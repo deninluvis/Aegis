@@ -91,7 +91,7 @@
   }
 
   // ---------- UI helpers ----------
-  function markDone(stepEl) { stepEl.classList.remove('active'); stepEl.classList.add('done'); }
+  function markDone(stepEl) { stepEl.classList.remove('active'); stepEl.classList.add('done'); stepEl.style.display = 'none'; }
   function markActive(stepEl) { stepEl.style.display = 'block'; stepEl.classList.add('active'); }
   function setStatus(id, text, cls) {
     const el = $(id);
@@ -187,6 +187,10 @@
       $('msgInput').disabled = false;
       $('btnSend').disabled = false;
       $('btnAttach').disabled = false;
+      document.body.classList.add('connected');
+      ['step1', 'step2host', 'step3host', 'step2join', 'step3join'].forEach(id => {
+        $(id).style.display = 'none';
+      });
       addMsg('Line connected. Messages below are end-to-end encrypted.', 'sys');
       if (isHost) setStatus('connectStatusHost', 'connected', 'ok');
       else setStatus('connectStatusJoin', 'connected', 'ok');
@@ -259,6 +263,8 @@
     e.target.value = '';
   });
 
+  let firstMessageSent = false;
+
   async function sendMessage() {
     const input = $('msgInput');
     const text = input.value.trim();
@@ -267,6 +273,10 @@
     dc.send(payload);
     addMsg(text, 'me');
     input.value = '';
+    if (!firstMessageSent) {
+      firstMessageSent = true;
+      $('step4').style.display = 'none';
+    }
   }
   $('btnSend').addEventListener('click', sendMessage);
   $('msgInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
@@ -274,12 +284,14 @@
   // ---------- role selection ----------
   $('btnHost').addEventListener('click', () => {
     isHost = true;
-    markDone($('step1'));
+    $('btnHost').disabled = true;
+    $('btnJoin').disabled = true;
     markActive($('step2host'));
   });
   $('btnJoin').addEventListener('click', () => {
     isHost = false;
-    markDone($('step1'));
+    $('btnHost').disabled = true;
+    $('btnJoin').disabled = true;
     markActive($('step2join'));
   });
 
@@ -301,7 +313,6 @@
     $('offerOut').value = btoa(JSON.stringify(bundle));
     $('copyOffer').disabled = false;
     setStatus('offerStatus', 'ready to send', 'ok');
-    markDone($('step2host'));
     markActive($('step3host'));
   });
   $('copyOffer').addEventListener('click', () => {
@@ -354,7 +365,6 @@
       $('answerOut').value = btoa(JSON.stringify(outBundle));
       $('copyAnswer').disabled = false;
 
-      markDone($('step2join'));
       markActive($('step3join'));
       markActive($('step4'));
     } catch (err) {

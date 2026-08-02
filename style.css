@@ -39,7 +39,7 @@
     transition:border-color .2s ease;
   }
   .step.active{border-color:var(--brass-dim);}
-  .step.done{border-color:#3A4736;}
+  .step.done{display:none;}
   .step-head{
     display:flex; align-items:center; gap:14px;
     padding:16px 20px;
@@ -76,7 +76,13 @@
     border:1px solid var(--line); border-radius:7px; padding:12px;
     font-family:'IBM Plex Mono', monospace; font-size:11.5px; line-height:1.5;
     resize:vertical; min-height:88px; margin-top:10px;
+    scrollbar-width:thin; scrollbar-color:var(--line) var(--ink);
   }
+  textarea::-webkit-scrollbar{width:10px; height:10px;}
+  textarea::-webkit-scrollbar-track{background:var(--ink);}
+  textarea::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px; border:2px solid var(--ink);}
+  textarea::-webkit-scrollbar-thumb:hover{background:var(--brass-dim);}
+  textarea::-webkit-scrollbar-corner{background:var(--ink);}
   .row{display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; align-items:center;}
   .hint{font-size:11.5px; color:var(--paper-dim); margin-top:8px; line-height:1.5;}
   .status-line{font-size:11.5px; margin-top:8px; display:flex; align-items:center; gap:6px;}
@@ -98,7 +104,12 @@
   .chat.active{display:block;}
   .chat-log{
     height:320px; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:10px;
+    scrollbar-width:thin; scrollbar-color:var(--line) var(--panel);
   }
+  .chat-log::-webkit-scrollbar{width:10px;}
+  .chat-log::-webkit-scrollbar-track{background:var(--panel);}
+  .chat-log::-webkit-scrollbar-thumb{background:var(--line); border-radius:6px; border:2px solid var(--panel);}
+  .chat-log::-webkit-scrollbar-thumb:hover{background:var(--brass-dim);}
   .msg{max-width:75%; padding:9px 13px; border-radius:9px; font-size:13px; line-height:1.5;}
   .msg.me{align-self:flex-end; background:var(--brass); color:#1a1400;}
   .msg.them{align-self:flex-start; background:var(--panel-2); border:1px solid var(--line);}
@@ -118,4 +129,14 @@
 
   footer{margin-top:40px; font-size:11px; color:var(--paper-dim); line-height:1.6;}
   a{color:var(--brass);}
+
+  body.connected .badge-row,
+  body.connected header.top p,
+  body.connected footer{
+    display:none;
+  }
+  body.connected header.top{margin-bottom:20px;}
+  body.connected .wrap{padding-top:32px;}
+  body.connected .chat-log{height:min(60vh,520px);}
+
   @media (prefers-reduced-motion: reduce){ *{transition:none !important;} }
