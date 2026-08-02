@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aegis — direct, encrypted, no server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Aegis</h1>
+    <p>A direct line between two browsers. No account, no server relaying your messages, no third party holding a key. Connection details and encryption keys pass hand-to-hand — you copy them to the other person yourself.</p>
+    <div class="badge-row">
+      <span class="badge">Peer to peer</span>
+      <span class="badge">ECDH · AES-256-GCM</span>
+      <span class="badge">Nothing stored</span>
+    </div>
+  </header>
+
+  <!-- STEP 1 -->
+  <div class="step active" id="step1">
+    <div class="step-head">
+      <div class="step-num">1</div>
+      <div>
+        <div class="step-title">Choose who starts</div>
+        <div class="step-sub">One of you opens the line, the other joins it. Doesn't matter who.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="role-pick">
+        <button class="primary" id="btnHost">I'll start the line</button>
+        <button id="btnJoin">I'm joining a line</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: HOST -->
+  <div class="step" id="step2host" style="display:none">
+    <div class="step-head">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">Send this to the other person</div>
+        <div class="step-sub">Contains your connection info and your public key. Safe to send in plain text — it can't be used to decrypt anything by itself.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <button id="btnCreateOffer">Generate invite</button>
+      <textarea id="offerOut" readonly placeholder="Your invite will appear here…"></textarea>
+      <div class="row">
+        <button id="copyOffer" disabled>Copy invite</button>
+        <span class="status-line" id="offerStatus"><span class="dot"></span>waiting</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: HOST -->
+  <div class="step" id="step3host" style="display:none">
+    <div class="step-head">
+      <div class="step-num">3</div>
+      <div>
+        <div class="step-title">Paste their reply</div>
+        <div class="step-sub">Once they send back their reply blob, paste it here.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <textarea id="answerIn" placeholder="Paste their reply here…"></textarea>
+      <div class="row">
+        <button class="primary" id="btnAcceptAnswer">Connect</button>
+        <span class="status-line" id="connectStatusHost"><span class="dot"></span>not connected</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: JOIN -->
+  <div class="step" id="step2join" style="display:none">
+    <div class="step-head">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">Paste their invite</div>
+        <div class="step-sub">Paste the blob the other person sent you.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <textarea id="offerIn" placeholder="Paste their invite here…"></textarea>
+      <div class="row">
+        <button class="primary" id="btnCreateAnswer">Generate reply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: JOIN -->
+  <div class="step" id="step3join" style="display:none">
+    <div class="step-head">
+      <div class="step-num">3</div>
+      <div>
+        <div class="step-title">Send this back</div>
+        <div class="step-sub">Send this reply to them. Once they accept it, the line connects.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <textarea id="answerOut" readonly placeholder="Your reply will appear here…"></textarea>
+      <div class="row">
+        <button id="copyAnswer" disabled>Copy reply</button>
+        <span class="status-line" id="connectStatusJoin"><span class="dot"></span>waiting for them to connect</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: VERIFY -->
+  <div class="step" id="step4" style="display:none">
+    <div class="step-head">
+      <div class="step-num">4</div>
+      <div>
+        <div class="step-title">Check the pattern matches</div>
+        <div class="step-sub">This grid is generated from your shared key. Read it aloud, or glance at it together — if it matches on both screens, no one is in the middle.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="fingerprint" id="fingerprint"></div>
+      <div class="hint" id="fpWords"></div>
+    </div>
+  </div>
+
+  <div class="row" id="historyBar" style="display:none; margin:0 0 12px;">
+    <span class="hint" id="historyCount" style="margin:0;"></span>
+    <button id="btnClearHistory">Clear local history</button>
+  </div>
+
+  <!-- CHAT -->
+  <div class="chat" id="chat">
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-input">
+      <input type="file" id="fileInput" style="display:none">
+      <button id="btnAttach" disabled title="Send a file">📎</button>
+      <input type="text" id="msgInput" placeholder="Type a message…" disabled>
+      <button class="primary" id="btnSend" disabled>Send</button>
+    </div>
+  </div>
+
+  <footer>
+    Keys are generated fresh in your browser and never leave it — only public keys travel in the invite/reply text. Refreshing the page destroys all keys and history. Files are sent directly over the same encrypted line, in chunks — they aren't relayed anywhere. Local history keeps a note of which files were sent or received, not the file contents themselves. This uses public STUN servers only to help two devices on different networks find each other; no message, key, or file data ever passes through them.
+  </footer>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
