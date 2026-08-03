@@ -155,16 +155,25 @@
     if (persist) saveHistoryEntry(text, cls);
   }
 
-  function waitIceComplete(pc) {
+  function waitIceComplete(pc, timeoutMs = 2500) {
     return new Promise(resolve => {
       if (pc.iceGatheringState === 'complete') return resolve();
+      let done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        pc.removeEventListener('icegatheringstatechange', check);
+        clearTimeout(timer);
+        resolve();
+      }
       function check() {
-        if (pc.iceGatheringState === 'complete') {
-          pc.removeEventListener('icegatheringstatechange', check);
-          resolve();
-        }
+        if (pc.iceGatheringState === 'complete') finish();
       }
       pc.addEventListener('icegatheringstatechange', check);
+      // Don't block forever on slow networks (common on mobile/cellular) — proceed
+      // with whichever candidates have been found by the timeout. The local
+      // description is updated incrementally as candidates arrive, so this is safe.
+      const timer = setTimeout(finish, timeoutMs);
     });
   }
 
