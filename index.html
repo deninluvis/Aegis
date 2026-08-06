@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Aegis — direct, encrypted, no server</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12151C">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Aegis">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -21,8 +29,38 @@
     </div>
   </header>
 
+  <!-- CONTACTS HOME -->
+  <div class="contacts-panel" id="contactsPanel">
+    <div class="panel-section-label" id="groupsLabel" style="display:none">Groups</div>
+    <div class="contacts-list" id="groupsList"></div>
+    <button id="btnNewGroup" style="margin-bottom:20px;">+ New group</button>
+
+    <div class="panel-section-label">Lines</div>
+    <div class="contacts-list" id="contactsList"></div>
+    <button class="primary" id="btnNewLine">+ Start a new line</button>
+  </div>
+
+  <!-- NEW GROUP -->
+  <div class="step" id="newGroupPanel" style="display:none">
+    <div class="step-head">
+      <div class="step-num">✦</div>
+      <div>
+        <div class="step-title">Create a group</div>
+        <div class="step-sub">Pick two or more short-code lines to include. Manual copy-paste lines can't be used in a group, since there's no way to auto-reconnect to several people at once.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <button id="btnBackFromNewGroup" class="back-link">← Back to contacts</button>
+      <input type="text" id="groupName" class="name-input" placeholder="Name this group (e.g. Weekend Trip)" maxlength="40">
+      <div class="member-picker" id="memberPicker"></div>
+      <div class="row">
+        <button class="primary" id="btnCreateGroup">Create group</button>
+      </div>
+    </div>
+  </div>
+
   <!-- STEP 1 -->
-  <div class="step active" id="step1">
+  <div class="step" id="step1" style="display:none">
     <div class="step-head">
       <div class="step-num">1</div>
       <div>
@@ -31,10 +69,16 @@
       </div>
     </div>
     <div class="step-body">
+      <button id="btnBackToContacts" class="back-link">← Back to contacts</button>
+      <input type="text" id="lineName" class="name-input" placeholder="Name this line (e.g. Alex)" maxlength="40">
       <div class="role-pick">
         <button class="primary" id="btnHost">I'll start the line</button>
         <button id="btnJoin">I'm joining a line</button>
       </div>
+      <label class="relay-toggle">
+        <input type="checkbox" id="useRelay">
+        Connect automatically with a short code, instead of copy-paste (uses a small relay server)
+      </label>
     </div>
   </div>
 
@@ -110,6 +154,40 @@
     </div>
   </div>
 
+  <!-- STEP 2: HOST via RELAY -->
+  <div class="step" id="step2hostRelay" style="display:none">
+    <div class="step-head">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">Share this code</div>
+        <div class="step-sub">Tell them this code (out loud, text, however) and have them enter it on their end. It connects automatically once they do.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <button id="btnRelayHostStart">Get a code</button>
+      <div class="relay-code" id="relayHostCode">— — — — — —</div>
+      <div class="status-line" id="relayHostStatus"><span class="dot"></span>not started</div>
+    </div>
+  </div>
+
+  <!-- STEP 2: JOIN via RELAY -->
+  <div class="step" id="step2joinRelay" style="display:none">
+    <div class="step-head">
+      <div class="step-num">2</div>
+      <div>
+        <div class="step-title">Enter their code</div>
+        <div class="step-sub">Type in the code the other person shared with you.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <input type="text" id="relayJoinCode" class="relay-input" placeholder="CODE" maxlength="8" autocapitalize="characters" autocomplete="off">
+      <div class="row">
+        <button class="primary" id="btnRelayJoinConnect">Connect</button>
+        <span class="status-line" id="relayJoinStatus"><span class="dot"></span>waiting for a code</span>
+      </div>
+    </div>
+  </div>
+
   <!-- STEP 4: VERIFY -->
   <div class="step" id="step4" style="display:none">
     <div class="step-head">
@@ -125,6 +203,39 @@
     </div>
   </div>
 
+  <!-- RECONNECT (shown automatically when opening a saved contact) -->
+  <div class="step" id="reconnectPanel" style="display:none">
+    <div class="step-head">
+      <div class="step-num">↻</div>
+      <div>
+        <div class="step-title" id="reconnectStatus">Reconnecting…</div>
+        <div class="step-sub">Using your saved identity and room code. This only works if the other person is also back online.</div>
+      </div>
+    </div>
+    <div class="step-body">
+      <div class="status-line" id="reconnectStatusLine"><span class="dot"></span>waiting</div>
+      <div class="row">
+        <button id="btnReconnectCancel">← Back to contacts</button>
+        <button id="btnReconnectRetry" style="display:none">Try again</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="chat-header" id="chatHeader" style="display:none">
+    <button id="btnBackToContactsChat" class="back-link" title="Back to contacts" aria-label="Back to contacts">←</button>
+    <span class="chat-header-name" id="chatHeaderName">—</span>
+    <button id="btnForgetLine" class="forget-link">Forget this line</button>
+  </div>
+
+  <div class="chat-header group-chat-header" id="groupChatHeader" style="display:none">
+    <div class="chat-header-row">
+      <button id="btnBackToContactsGroup" class="back-link" title="Back to contacts" aria-label="Back to contacts">←</button>
+      <span class="chat-header-name" id="groupChatHeaderName">—</span>
+      <button id="btnForgetGroup" class="forget-link">Forget group</button>
+    </div>
+    <div class="member-status-row" id="memberStatusRow"></div>
+  </div>
+
   <div class="row" id="historyBar" style="display:none; margin:0 0 12px;">
     <span class="hint" id="historyCount" style="margin:0;"></span>
     <button id="btnClearHistory">Clear local history</button>
@@ -132,17 +243,37 @@
 
   <!-- CHAT -->
   <div class="chat" id="chat">
+    <div class="call-bar" id="callBar" style="display:none">
+      <audio id="remoteAudio" autoplay playsinline></audio>
+      <div class="call-status" id="callStatus">Calling…</div>
+      <div class="call-row" id="callIncoming" style="display:none">
+        <button class="primary" id="btnAccept">Accept</button>
+        <button id="btnDecline">Decline</button>
+      </div>
+      <div class="call-row" id="callControls" style="display:none">
+        <button id="btnMute">Mute</button>
+        <button id="btnHangup" class="danger">End call</button>
+      </div>
+      <div class="call-row" id="callCalling" style="display:none">
+        <button id="btnCancelCall">Cancel</button>
+      </div>
+    </div>
     <div class="chat-log" id="chatLog"></div>
     <div class="chat-input">
       <input type="file" id="fileInput" style="display:none">
-      <button id="btnAttach" disabled title="Send a file">📎</button>
+      <button id="btnAttach" disabled title="Send a file" aria-label="Send a file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.67 3.67 0 0 1 5.19 5.19l-9.2 9.19a1.83 1.83 0 0 1-2.6-2.6l8.49-8.48"/></svg>
+      </button>
+      <button id="btnCallAudio" disabled title="Voice call" aria-label="Voice call">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4h3.5l2 5-2.5 1.5a11 11 0 0 0 5.5 5.5L14.5 13l5 2v3.5a2 2 0 0 1-2.2 2A17.5 17.5 0 0 1 2.5 6.2 2 2 0 0 1 4.5 4Z"/></svg>
+      </button>
       <input type="text" id="msgInput" placeholder="Type a message…" disabled>
       <button class="primary" id="btnSend" disabled>Send</button>
     </div>
   </div>
 
   <footer>
-    Keys are generated fresh in your browser and never leave it — only public keys travel in the invite/reply text. Refreshing the page destroys all keys and history. Files are sent directly over the same encrypted line, in chunks — they aren't relayed anywhere. Local history keeps a note of which files were sent or received, not the file contents themselves. This uses public STUN servers only to help two devices on different networks find each other; no message, key, or file data ever passes through them.
+    Keys are generated fresh in your browser and never leave it — only public keys travel in the invite/reply text. Files are sent directly over the same encrypted line, in chunks — they aren't relayed anywhere. Voice calls connect the same way: audio streams directly between your two browsers, encrypted end-to-end by WebRTC itself, with call setup messages passed over the already-encrypted data channel. Local history keeps a note of which files were sent or received, and when calls happened, not the file or call contents themselves, kept separately for each contact. This uses public STUN servers only to help two devices on different networks find each other; no message, key, file, or call data ever passes through them. The optional short-code connect mode uses a small relay server to forward the invite/reply handshake automatically instead of copy-paste, and lets a saved contact reconnect later — it still can't read your messages, but unlike hand-to-hand copy-paste it does briefly see each connection setup, so always check the pattern matches on both screens before trusting a line. Contacts made via manual copy-paste can't reconnect automatically and will need a fresh exchange each time. Groups work by opening a separate direct encrypted line to every member at once and copying each message to all of them — there's no shared group key and no server relaying anything between members, so a group is really several 1:1 lines sent in parallel. Voice calls and file sharing are 1:1 only for now, not available inside a group. "Forget this line" or "Forget group" permanently deletes that saved identity and history from this device.
   </footer>
 </div>
 
