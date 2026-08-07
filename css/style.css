@@ -21,7 +21,12 @@
   }
   .wrap{max-width:760px;margin:0 auto;padding:48px 20px 80px;}
   h1,h2{font-family:'Fraunces', Georgia, serif; font-weight:600; letter-spacing:-0.01em;}
-  header.top{margin-bottom:44px;}
+  header.top{margin-bottom:44px; position:relative;}
+  .reset-link{
+    position:absolute; top:0; right:0;
+    background:none; border:none; color:var(--err); font-size:11.5px; padding:6px 4px;
+  }
+  .reset-link:hover{color:#D68A79;}
   header.top h1{font-size:clamp(28px,5vw,40px); margin:0 0 8px; color:var(--paper);}
   header.top p{color:var(--paper-dim); margin:0; font-size:14px; line-height:1.6; max-width:52ch;}
   .badge-row{display:flex; gap:8px; margin-top:18px; flex-wrap:wrap;}
@@ -69,7 +74,7 @@
     padding:14px; border:1px dashed var(--line); border-radius:8px; background:var(--ink);
   }
   .relay-input{
-    width:100%; background:var(--ink); color:var(--paper); border:1px solid var(--line);
+    flex:1; min-width:0; background:var(--ink); color:var(--paper); border:1px solid var(--line);
     border-radius:7px; padding:12px; font-family:'Fraunces', serif; font-size:22px;
     letter-spacing:.14em; text-align:center; text-transform:uppercase;
   }
@@ -83,9 +88,20 @@
     padding:13px 16px; cursor:pointer; transition:border-color .15s ease;
   }
   .contact-row:hover{border-color:var(--brass-dim);}
+  .contact-row:focus-visible{outline:2px solid var(--brass-dim); outline-offset:2px;}
   .contact-row .dot{width:8px; height:8px; flex-shrink:0;}
   .contact-row .contact-name{flex:1; font-size:14px; color:var(--paper); font-weight:500;}
   .contact-row .contact-meta{font-size:11px; color:var(--paper-dim);}
+  .contact-forget{
+    flex-shrink:0; background:none; border:none; color:var(--paper-dim);
+    font-size:13px; line-height:1; padding:4px 6px; border-radius:6px;
+  }
+  .contact-forget:hover{color:var(--err); border-color:transparent;}
+  .unread-badge{
+    flex-shrink:0; background:var(--brass); color:var(--ink); font-size:11px; font-weight:600;
+    min-width:18px; height:18px; border-radius:9px; padding:0 5px;
+    display:flex; align-items:center; justify-content:center;
+  }
   .contacts-empty{
     font-size:12.5px; color:var(--paper-dim); text-align:center;
     padding:24px 12px; border:1px dashed var(--line); border-radius:10px; margin-bottom:14px;
@@ -94,21 +110,6 @@
     font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--paper-dim);
     margin:4px 0 8px;
   }
-  .group-row .contact-name::before{content:'✦ '; color:var(--brass);}
-
-  /* ---------- new group panel ---------- */
-  .member-picker{display:flex; flex-direction:column; gap:8px; margin-bottom:14px;}
-  .member-option{
-    display:flex; align-items:center; gap:10px; border:1px solid var(--line);
-    background:var(--panel-2); border-radius:8px; padding:11px 14px; cursor:pointer;
-  }
-  .member-option input{accent-color:var(--brass); flex-shrink:0;}
-  .member-option span{font-size:13px; color:var(--paper);}
-  .member-picker-empty{
-    font-size:12px; color:var(--paper-dim); padding:14px; text-align:center;
-    border:1px dashed var(--line); border-radius:8px; margin-bottom:14px;
-  }
-
   /* ---------- name input / back link ---------- */
   .name-input{
     width:100%; background:var(--ink); color:var(--paper); border:1px solid var(--line);
@@ -120,7 +121,7 @@
   }
   .back-link:hover{color:var(--brass); border-color:transparent;}
 
-  /* ---------- chat header (active contact / group) ---------- */
+  /* ---------- chat header (active contact) ---------- */
   .chat-header{
     display:flex; align-items:center; gap:10px; margin-bottom:12px;
   }
@@ -130,14 +131,7 @@
     background:none; border:none; color:var(--err); font-size:11.5px; padding:6px 4px;
   }
   .forget-link:hover{color:#D68A79; border-color:transparent;}
-  .group-chat-header{flex-direction:column; align-items:stretch; gap:8px;}
-  .chat-header-row{display:flex; align-items:center; gap:10px;}
-  .member-status-row{display:flex; flex-wrap:wrap; gap:6px 14px; padding-left:2px;}
-  .member-status-item{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--paper-dim);}
-  .member-status-item .dot{width:6px; height:6px;}
 
-  /* ---------- sender tag on group messages ---------- */
-  .msg-sender{font-size:10.5px; color:var(--brass); margin-bottom:2px; font-weight:600;}
   button{
     font-family:inherit; font-size:13px; cursor:pointer;
     background:var(--panel-2); color:var(--paper); border:1px solid var(--line);
@@ -213,7 +207,7 @@
   .msg.me .file-bubble a{color:#1a1400;}
 
   .call-bar{
-    border-bottom:1px solid var(--line); padding:16px 20px;
+    border:1px solid var(--line); border-radius:10px; padding:16px 20px; margin-bottom:16px;
     display:flex; flex-direction:column; align-items:center; gap:10px;
     background:var(--panel-2);
   }

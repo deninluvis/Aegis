@@ -1,9 +1,14 @@
+console.log('[Aegis] script.js executing at', new Date().toISOString(),
+  'navType:', (performance.getEntriesByType('navigation')[0] || {}).type,
+  'wasDiscarded:', document.wasDiscarded, 'visibility:', document.visibilityState);
+
 (() => {
   const $ = id => document.getElementById(id);
 
   // connections: contactId -> { pc, dc, myKeyPair, sharedAesKey, peerPubJwk, contact, status, showFingerprint, attachHandlers }
   const connections = {};
-  let currentView = null; // { type: 'contact', contactId } | { type: 'group', groupId }
+  const unreadCounts = {}; // contactId -> unread message count (in-memory, resets on reload)
+  let currentView = null; // { type: 'contact', contactId }
   let pendingLineName = null;
   let pendingReconnectContactId = null;
 
@@ -113,14 +118,24 @@
   }
   function saveContacts(list) { localStorage.setItem(CONTACTS_KEY, JSON.stringify(list)); }
 
-  // ---------- groups ----------
-  const GROUPS_KEY = 'aegis_groups';
-  function getGroups() {
-    try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch (e) { return []; }
-  }
-  function saveGroups(list) { localStorage.setItem(GROUPS_KEY, JSON.stringify(list)); }
   function relayCapableContacts() {
     return getContacts().filter(c => c.roomCode && c.myPub && c.myPriv);
+  }
+
+  function bumpUnread(id) {
+    unreadCounts[id] = (unreadCounts[id] || 0) + 1;
+    renderHomeLists();
+  }
+  function clearUnread(id) {
+    if (unreadCounts[id]) { delete unreadCounts[id]; renderHomeLists(); }
+  }
+  function appendUnreadBadge(row, id) {
+    const count = unreadCounts[id];
+    if (!count) return;
+    const badge = document.createElement('span');
+    badge.className = 'unread-badge';
+    badge.textContent = count > 9 ? '9+' : String(count);
+    row.appendChild(badge);
   }
 
   function renderHomeLists() {
@@ -134,36 +149,41 @@
       listEl.appendChild(empty);
     } else {
       contacts.forEach(c => {
-        const row = document.createElement('button');
+        const conn = connections[c.id];
+        // A <div> here, not a <button> — it needs to contain its own forget button, and a button
+        // can't validly nest another interactive button.
+        const row = document.createElement('div');
         row.className = 'contact-row';
-        const dot = document.createElement('span'); dot.className = 'dot';
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        const dot = document.createElement('span');
+        dot.className = 'dot' + (conn && conn.status === 'open' ? ' ok' : conn && conn.status === 'failed' ? ' err' : '');
         const name = document.createElement('span'); name.className = 'contact-name'; name.textContent = c.name;
-        const meta = document.createElement('span'); meta.className = 'contact-meta'; meta.textContent = c.roomCode ? 'tap to reconnect' : 'manual only';
+        const meta = document.createElement('span'); meta.className = 'contact-meta';
+        meta.textContent = !c.roomCode ? 'manual only'
+          : conn && conn.status === 'open' ? 'online'
+          : conn && conn.status === 'connecting' ? 'connecting…'
+          : 'offline';
         row.appendChild(dot); row.appendChild(name); row.appendChild(meta);
+        appendUnreadBadge(row, c.id);
+        const forgetBtn = document.createElement('button');
+        forgetBtn.className = 'contact-forget';
+        forgetBtn.textContent = '✕';
+        forgetBtn.title = 'Forget this line';
+        forgetBtn.setAttribute('aria-label', 'Forget ' + c.name);
+        forgetBtn.addEventListener('click', (e) => { e.stopPropagation(); forgetContact(c.id); });
+        row.appendChild(forgetBtn);
         row.addEventListener('click', () => openContact(c.id));
+        row.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openContact(c.id); }
+        });
         listEl.appendChild(row);
       });
     }
-
-    const groups = getGroups();
-    const groupsListEl = $('groupsList');
-    groupsListEl.innerHTML = '';
-    $('groupsLabel').style.display = groups.length ? 'block' : 'none';
-    groups.forEach(g => {
-      const row = document.createElement('button');
-      row.className = 'contact-row group-row';
-      const dot = document.createElement('span'); dot.className = 'dot';
-      const name = document.createElement('span'); name.className = 'contact-name'; name.textContent = g.name;
-      const meta = document.createElement('span'); meta.className = 'contact-meta'; meta.textContent = g.memberIds.length + ' members';
-      row.appendChild(dot); row.appendChild(name); row.appendChild(meta);
-      row.addEventListener('click', () => openGroup(g.id));
-      groupsListEl.appendChild(row);
-    });
   }
 
   // ---------- per-conversation local history ----------
   function historyKey(id) { return 'aegis_history_' + id; }
-  function groupHistoryKey(id) { return 'aegis_group_history_' + id; }
   function loadHistory(key) {
     try {
       const raw = localStorage.getItem(key);
@@ -175,7 +195,7 @@
     const hist = loadHistory(key);
     hist.push(Object.assign({}, entry, { ts: Date.now() }));
     localStorage.setItem(key, JSON.stringify(hist));
-    updateHistoryBar(key);
+    if (key === currentHistoryKey()) updateHistoryBar(key); // don't repaint the bar for a background contact's history
   }
   function updateHistoryBar(key) {
     const hist = loadHistory(key);
@@ -191,12 +211,6 @@
     hist.forEach(m => {
       const div = document.createElement('div');
       div.className = 'msg ' + m.cls;
-      if (m.senderName) {
-        const tag = document.createElement('div');
-        tag.className = 'msg-sender';
-        tag.textContent = m.senderName;
-        div.appendChild(tag);
-      }
       const body = document.createElement('div');
       body.textContent = m.text;
       div.appendChild(body);
@@ -209,7 +223,7 @@
   }
   function currentHistoryKey() {
     if (!currentView) return null;
-    return currentView.type === 'group' ? groupHistoryKey(currentView.groupId) : historyKey(currentView.contactId);
+    return historyKey(currentView.contactId);
   }
   $('btnClearHistory').addEventListener('click', () => {
     const key = currentHistoryKey();
@@ -227,12 +241,6 @@
     const log = $('chatLog');
     const div = document.createElement('div');
     div.className = 'msg ' + cls;
-    if (opts.senderName) {
-      const tag = document.createElement('div');
-      tag.className = 'msg-sender';
-      tag.textContent = opts.senderName;
-      div.appendChild(tag);
-    }
     const body = document.createElement('div');
     body.textContent = text;
     div.appendChild(body);
@@ -240,7 +248,7 @@
     log.scrollTop = log.scrollHeight;
     if (opts.persist !== false) {
       const key = currentHistoryKey();
-      saveHistoryEntry(key, { text: text, cls: cls, senderName: opts.senderName || null });
+      saveHistoryEntry(key, { text: text, cls: cls });
     }
   }
 
@@ -304,6 +312,26 @@
     if (document.visibilityState === 'visible' && !wakeLock && Object.keys(connections).some(k => connections[k].status === 'open')) {
       requestWakeLock();
     }
+  });
+
+  // ---------- recover from a frozen/back-forward-cached tab ----------
+  // A tab that gets suspended (closed to the OS task switcher, or restored via the browser's
+  // back-forward cache) can resume with its old JS state intact but its actual sockets long dead —
+  // the UI would then show stale "online" dots for lines that aren't really connected anymore.
+  function dropStaleConnections() {
+    let hadStale = false;
+    Object.keys(connections).forEach(id => {
+      const conn = connections[id];
+      if (conn.status === 'open' && (!conn.dc || conn.dc.readyState !== 'open')) {
+        closeConnection(id);
+        hadStale = true;
+      }
+    });
+    if (hadStale) { renderHomeLists(); connectAllHomeLines(); }
+  }
+  window.addEventListener('pageshow', (e) => { if (e.persisted) dropStaleConnections(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') dropStaleConnections();
   });
 
   // ---------- shared negotiation logic (per connection object) ----------
@@ -387,8 +415,8 @@
     renderConversationUI(contact);
   }
 
-  function renderConversationUI(contactOrGroup) {
-    $('chatHeaderName').textContent = contactOrGroup.name;
+  function renderConversationUI(contact) {
+    $('chatHeaderName').textContent = contact.name;
     const log = $('chatLog');
     log.innerHTML = '';
     renderSavedHistory(currentHistoryKey());
@@ -397,6 +425,21 @@
 
   function setupDataChannelHandlersForContact(conn) {
     conn.dc.bufferedAmountLowThreshold = 262144;
+    // Same reasoning as the background handler: the remote side closing abruptly can leave the data
+    // channel's own close event lagging — react to the peer connection's aggregate state instead.
+    let disconnectGraceTimer = null;
+    conn.pc.onconnectionstatechange = () => {
+      const state = conn.pc.connectionState;
+      if (state === 'connected' && disconnectGraceTimer) { clearTimeout(disconnectGraceTimer); disconnectGraceTimer = null; }
+      if (state === 'failed') {
+        try { conn.dc.close(); } catch (e) {}
+      } else if (state === 'disconnected' && !disconnectGraceTimer) {
+        disconnectGraceTimer = setTimeout(() => {
+          disconnectGraceTimer = null;
+          if (conn.pc.connectionState !== 'connected') { try { conn.dc.close(); } catch (e) {} }
+        }, 5000);
+      }
+    };
     conn.dc.onopen = async () => {
       conn.status = 'open';
       $('chat').classList.add('active');
@@ -405,11 +448,10 @@
       $('btnAttach').disabled = false;
       $('btnCallAudio').disabled = false;
       document.body.classList.add('connected');
-      ['step1', 'step2host', 'step3host', 'step2join', 'step3join', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel', 'contactsPanel', 'newGroupPanel'].forEach(id => {
+      ['step1', 'step2host', 'step3host', 'step2join', 'step3join', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel', 'contactsPanel'].forEach(id => {
         $(id).style.display = 'none';
       });
       $('chatHeader').style.display = 'flex';
-      $('groupChatHeader').style.display = 'none';
 
       await finalizeContactOnConnect(conn);
 
@@ -420,7 +462,7 @@
     };
     conn.dc.onclose = () => {
       conn.status = 'closed';
-      if (inCall || pendingCallOffer) endCallUI();
+      if (activeCallContactId === conn.contact.id && (inCall || pendingCallOffer)) endCallUI();
       releaseWakeLockIfIdle();
       addMsg('Line closed.', 'sys');
     };
@@ -457,9 +499,9 @@
     } else if (obj.t === 'call-answer') {
       await handleCallAnswer(conn, obj);
     } else if (obj.t === 'call-decline') {
-      endCallUI('Call declined.');
+      if (activeCallContactId === conn.contact.id) endCallUI('Call declined.');
     } else if (obj.t === 'call-end') {
-      endCallUI('Call ended.');
+      if (activeCallContactId === conn.contact.id) endCallUI('Call ended.');
     }
   }
 
@@ -505,8 +547,17 @@
     e.target.value = '';
   });
 
-  // ---------- calling (1:1 only) ----------
+  // ---------- calling (1:1 only, works from any screen — home or chat) ----------
   let pendingCallOffer = null, inCall = false, callTimerInterval = null, localCallStream = null;
+  let activeCallContactId = null; // which line the call belongs to — independent of currentView, so it survives navigating home
+
+  function callConn() {
+    return activeCallContactId ? (connections[activeCallContactId] || null) : null;
+  }
+  function activeCallContactName() {
+    const conn = callConn();
+    return (conn && conn.contact && conn.contact.name) || 'them';
+  }
 
   function setCallView(mode) {
     $('callBar').style.display = mode === 'hidden' ? 'none' : 'flex';
@@ -517,11 +568,12 @@
   function startCallTimer() {
     let secs = 0;
     const label = $('callStatus');
+    const name = activeCallContactName();
     callTimerInterval = setInterval(() => {
       secs++;
       const m = String(Math.floor(secs / 60)).padStart(2, '0');
       const s = String(secs % 60).padStart(2, '0');
-      label.textContent = 'Voice call \u2014 ' + m + ':' + s;
+      label.textContent = 'Voice call with ' + name + ' \u2014 ' + m + ':' + s;
     }, 1000);
   }
   function stopCallTimer() { clearInterval(callTimerInterval); callTimerInterval = null; }
@@ -536,7 +588,7 @@
       localCallStream.getTracks().forEach(t => t.stop());
       localCallStream = null;
     }
-    const conn = activeContactConn();
+    const conn = callConn();
     if (conn && conn.pc) {
       conn.pc.getSenders().forEach(sender => {
         if (sender.track) { try { conn.pc.removeTrack(sender); } catch (e) {} }
@@ -550,18 +602,35 @@
     inCall = false;
     pendingCallOffer = null;
     setCallView('hidden');
-    if (sysMsg) addMsg(sysMsg, 'sys');
+    if (sysMsg) recordCallSysMsg(activeCallContactId, sysMsg);
+    activeCallContactId = null;
+  }
+
+  // A call can end while we're not viewing that contact's chat (e.g. on the home screen) —
+  // render live only if it's the open conversation, otherwise just save it to that line's history.
+  function recordCallSysMsg(contactId, text) {
+    if (isViewingContact(contactId)) {
+      addMsg(text, 'sys');
+    } else if (contactId) {
+      saveHistoryEntry(historyKey(contactId), { text: text, cls: 'sys-file' });
+    }
+  }
+  function isViewingContact(contactId) {
+    return !!(contactId && currentView && currentView.type === 'contact' && currentView.contactId === contactId);
   }
 
   async function startCall() {
-    const conn = activeContactConn();
+    if (!currentView || currentView.type !== 'contact') return;
+    const conn = connections[currentView.contactId];
     if (!conn || !conn.dc || conn.dc.readyState !== 'open' || inCall) return;
+    activeCallContactId = currentView.contactId;
     inCall = true;
     try {
       localCallStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
       inCall = false;
-      addMsg('Could not access the microphone \u2014 check permissions.', 'sys');
+      recordCallSysMsg(activeCallContactId, 'Could not access the microphone \u2014 check permissions.');
+      activeCallContactId = null;
       return;
     }
     try {
@@ -570,14 +639,15 @@
       await conn.pc.setLocalDescription(offer);
       await waitIceComplete(conn.pc);
       conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'call-offer', sdp: conn.pc.localDescription }));
-      $('callStatus').textContent = 'Calling\u2026';
+      $('callStatus').textContent = 'Calling ' + activeCallContactName() + '\u2026';
       setCallView('calling');
     } catch (err) {
       inCall = false;
       stopLocalCallStream();
       setCallView('hidden');
       console.error('Aegis call (offer) failed:', err);
-      addMsg('Could not start the call (' + (err && err.message ? err.message : 'unknown error') + ').', 'sys');
+      recordCallSysMsg(activeCallContactId, 'Could not start the call (' + (err && err.message ? err.message : 'unknown error') + ').');
+      activeCallContactId = null;
     }
   }
 
@@ -586,13 +656,14 @@
       encryptObj(conn.sharedAesKey, { t: 'call-decline' }).then(payload => conn.dc.send(payload));
       return;
     }
+    activeCallContactId = conn.contact.id;
     pendingCallOffer = obj;
-    $('callStatus').textContent = 'Incoming voice call\u2026';
+    $('callStatus').textContent = 'Incoming voice call from ' + conn.contact.name + '\u2026';
     setCallView('incoming');
   }
 
   async function acceptCall() {
-    const conn = activeContactConn();
+    const conn = callConn();
     if (!pendingCallOffer || !conn) return;
     const obj = pendingCallOffer;
     inCall = true;
@@ -602,8 +673,9 @@
       inCall = false;
       pendingCallOffer = null;
       setCallView('hidden');
-      addMsg('Could not access the microphone \u2014 check permissions.', 'sys');
+      recordCallSysMsg(activeCallContactId, 'Could not access the microphone \u2014 check permissions.');
       conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'call-decline' }));
+      activeCallContactId = null;
       return;
     }
     try {
@@ -622,15 +694,17 @@
       stopLocalCallStream();
       setCallView('hidden');
       console.error('Aegis call (answer) failed:', err);
-      addMsg('Could not connect the call (' + (err && err.message ? err.message : 'unknown error') + ').', 'sys');
+      recordCallSysMsg(activeCallContactId, 'Could not connect the call (' + (err && err.message ? err.message : 'unknown error') + ').');
       if (conn.dc && conn.dc.readyState === 'open') conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'call-decline' }));
+      activeCallContactId = null;
     }
   }
 
   async function declineCall() {
-    const conn = activeContactConn();
+    const conn = callConn();
     if (conn && conn.dc && conn.dc.readyState === 'open') conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'call-decline' }));
     pendingCallOffer = null;
+    activeCallContactId = null;
     setCallView('hidden');
   }
 
@@ -641,7 +715,7 @@
   }
 
   async function hangup() {
-    const conn = activeContactConn();
+    const conn = callConn();
     if (conn && conn.dc && conn.dc.readyState === 'open') conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'call-end' }));
     endCallUI('Call ended.');
   }
@@ -659,7 +733,7 @@
     $('btnMute').textContent = track.enabled ? 'Mute' : 'Unmute';
   });
 
-  // ---------- sending a message (routes to 1:1 or broadcasts to a group) ----------
+  // ---------- sending a message ----------
   let firstMessageSent = false;
 
   async function sendMessage() {
@@ -667,23 +741,9 @@
     const text = input.value.trim();
     if (!text || !currentView) return;
 
-    if (currentView.type === 'contact') {
-      const conn = connections[currentView.contactId];
-      if (!conn || !conn.dc || conn.dc.readyState !== 'open') return;
-      conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', v: text }));
-    } else {
-      const group = getGroups().filter(g => g.id === currentView.groupId)[0];
-      if (!group) return;
-      let sentToAny = false;
-      for (let i = 0; i < group.memberIds.length; i++) {
-        const conn = connections[group.memberIds[i]];
-        if (conn && conn.dc && conn.dc.readyState === 'open') {
-          conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', v: text }));
-          sentToAny = true;
-        }
-      }
-      if (!sentToAny) return;
-    }
+    const conn = connections[currentView.contactId];
+    if (!conn || !conn.dc || conn.dc.readyState !== 'open') return;
+    conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', v: text }));
 
     addMsg(text, 'me');
     input.value = '';
@@ -696,6 +756,24 @@
   $('msgInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
 
   // ---------- contacts home navigation ----------
+  function goHome() {
+    currentView = null;
+    ['step1', 'step2host', 'step3host', 'step2join', 'step3join', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel'].forEach(id => {
+      $(id).style.display = 'none';
+    });
+    document.body.classList.remove('connected');
+    $('chat').classList.remove('active');
+    $('chatHeader').style.display = 'none';
+    $('msgInput').disabled = true;
+    $('btnSend').disabled = true;
+    $('btnAttach').disabled = true;
+    $('btnCallAudio').disabled = true;
+    $('chatLog').innerHTML = '';
+    $('historyBar').style.display = 'none';
+    $('contactsPanel').style.display = 'block';
+    renderHomeLists();
+  }
+
   function resetNewLineUI() {
     $('lineName').value = '';
     $('useRelay').checked = false;
@@ -709,21 +787,45 @@
     markActive($('step1'));
   });
   $('btnBackToContacts').addEventListener('click', () => location.reload());
-  $('btnBackToContactsChat').addEventListener('click', () => {
-    const conn = activeContactConn();
-    if (conn) { try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {} }
+
+  $('btnClearEverything').addEventListener('click', () => {
+    if (!confirm('Erase everything? This deletes every saved line and message history from this device. This cannot be undone.')) return;
+    if (prompt('Type ERASE to confirm.') !== 'ERASE') return;
+    Object.keys(connections).forEach(id => {
+      const conn = connections[id];
+      try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {}
+    });
+    Object.keys(localStorage).filter(k => k.startsWith('aegis_')).forEach(k => localStorage.removeItem(k));
     location.reload();
   });
+  $('btnBackToContactsChat').addEventListener('click', () => {
+    const conn = activeContactConn();
+    // A call (or a pending incoming offer) keeps running via the global call bar — no need to end it here.
+    if (conn && conn.dc && conn.dc.readyState === 'open') {
+      setupBackgroundContactHandlers(conn); // keep the line alive on the home screen instead of closing it
+    } else if (conn) {
+      const id = currentView.contactId;
+      try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {}
+      delete connections[id];
+    }
+    goHome();
+  });
+  function forgetContact(id) {
+    const contact = getContacts().find(c => c.id === id);
+    if (!confirm('Forget ' + (contact ? contact.name : 'this line') + '? This deletes its saved identity and history from this device.')) return;
+    saveContacts(getContacts().filter(c => c.id !== id));
+    localStorage.removeItem(historyKey(id));
+    delete unreadCounts[id];
+    closeConnection(id);
+    if (currentView && currentView.type === 'contact' && currentView.contactId === id) {
+      location.reload();
+    } else {
+      renderHomeLists();
+    }
+  }
   $('btnForgetLine').addEventListener('click', () => {
     if (!currentView || currentView.type !== 'contact') return;
-    if (!confirm('Forget this line? This deletes its saved identity and history from this device.')) return;
-    const id = currentView.contactId;
-    const contacts = getContacts().filter(c => c.id !== id);
-    saveContacts(contacts);
-    localStorage.removeItem(historyKey(id));
-    const conn = connections[id];
-    if (conn) { try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {} }
-    location.reload();
+    forgetContact(currentView.contactId);
   });
 
   // ---------- role selection (new 1:1 line) ----------
@@ -811,6 +913,7 @@
   $('btnRelayHostStart').addEventListener('click', () => {
     const code = randomRoomCode();
     $('relayHostCode').textContent = code;
+    $('btnCopyRelayCode').disabled = false;
     setStatus('relayHostStatus', 'waiting for them to enter this code\u2026');
     $('btnRelayHostStart').disabled = true;
 
@@ -827,9 +930,9 @@
         setStatus('relayHostStatus', 'they joined \u2014 exchanging keys\u2026', 'ok');
         ws.send(await genConnOfferBundle(conn));
       } else if (msg && msg.t === 'peer-left') {
-        setStatus('relayHostStatus', 'they disconnected before finishing \u2014 have them re-enter the code', 'err');
+        if (!conn.pc) setStatus('relayHostStatus', 'they disconnected before finishing \u2014 have them re-enter the code', 'err');
       } else if (msg && msg.t === 'room-full') {
-        setStatus('relayHostStatus', 'that code is already in use \u2014 try again for a new one', 'err');
+        if (!conn.pc) setStatus('relayHostStatus', 'that code is already in use \u2014 try again for a new one', 'err');
       } else if (!msg && typeof evt.data === 'string') {
         try {
           await acceptConnAnswerBundle(conn, evt.data);
@@ -843,7 +946,21 @@
     });
   });
 
+  $('btnCopyRelayCode').addEventListener('click', () => {
+    navigator.clipboard.writeText($('relayHostCode').textContent);
+    $('btnCopyRelayCode').textContent = 'Copied';
+    setTimeout(() => $('btnCopyRelayCode').textContent = 'Copy code', 1500);
+  });
+
   // JOIN side of the relay (new line)
+  $('btnPasteRelayCode').addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      $('relayJoinCode').value = text.trim().toUpperCase();
+    } catch (err) {
+      $('relayJoinCode').focus();
+    }
+  });
   $('btnRelayJoinConnect').addEventListener('click', () => {
     const code = $('relayJoinCode').value.trim().toUpperCase();
     if (!code) return;
@@ -867,15 +984,18 @@
     ws.addEventListener('message', async (evt) => {
       let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
       if (msg && msg.t === 'room-full') {
-        setStatus('relayJoinStatus', 'that code already has two people on it', 'err');
-        $('btnRelayJoinConnect').disabled = false;
+        if (!conn.pc) {
+          setStatus('relayJoinStatus', 'that code already has two people on it', 'err');
+          $('btnRelayJoinConnect').disabled = false;
+        }
       } else if (msg && msg.t === 'peer-left') {
-        setStatus('relayJoinStatus', 'the other side disconnected', 'err');
+        if (!conn.pc) setStatus('relayJoinStatus', 'the other side disconnected', 'err');
       } else if (!msg && typeof evt.data === 'string') {
         try {
           setStatus('relayJoinStatus', 'exchanging keys\u2026', 'ok');
           const answerBundle = await genConnAnswerBundle(conn, evt.data);
           ws.send(answerBundle);
+          ws.close();
           markDone($('step2joinRelay'));
           markActive($('step4'));
         } catch (err) {
@@ -902,17 +1022,38 @@
     const contact = contacts.filter(c => c.id === id)[0];
     if (!contact) return;
     $('contactsPanel').style.display = 'none';
+    clearUnread(id);
 
     if (!contact.roomCode || !contact.myPub || !contact.myPriv) {
       currentView = { type: 'contact', contactId: contact.id };
       $('chatHeader').style.display = 'flex';
-      $('groupChatHeader').style.display = 'none';
       document.body.classList.add('connected');
       $('chat').classList.add('active');
       renderConversationUI(contact);
       addMsg('This line was connected by manual copy-paste, so it can\'t reconnect automatically. Use "Forget this line" and start a new one to talk again.', 'sys', { persist: false });
       return;
     }
+
+    const existing = connections[id];
+    if (existing && existing.status === 'open') {
+      // Already connected in the background — attach to it instead of tearing down a live
+      // connection just to renegotiate a new one (which would also drop the other side).
+      currentView = { type: 'contact', contactId: contact.id };
+      document.body.classList.add('connected');
+      $('chat').classList.add('active');
+      $('msgInput').disabled = false;
+      $('btnSend').disabled = false;
+      $('btnAttach').disabled = false;
+      $('btnCallAudio').disabled = false;
+      $('chatHeader').style.display = 'flex';
+      renderConversationUI(contact);
+      setupDataChannelHandlersForContact(existing); // switch from silent background handling to live foreground handling
+      addMsg('Line connected. Messages below are end-to-end encrypted.', 'sys');
+      return;
+    }
+
+    // Drop any background presence connection so the foreground flow below gets a clean handshake.
+    closeConnection(id);
 
     currentView = { type: 'contact', contactId: contact.id };
     pendingReconnectContactId = id;
@@ -921,19 +1062,19 @@
   }
 
   async function attemptReconnectToContact(contact) {
-    const conn = { isHost: contact.isHost, usingRelay: true, roomCode: contact.roomCode, showFingerprint: false, attachHandlers: null, contact: contact };
+    const conn = { isHost: contact.isHost, usingRelay: true, roomCode: contact.roomCode, showFingerprint: false, status: 'connecting', attachHandlers: null, contact: contact };
     conn.attachHandlers = () => setupDataChannelHandlersForContact(conn);
 
     try {
       conn.myKeyPair = { privateKey: await importPriv(contact.myPriv), publicKey: await importPub(contact.myPub) };
     } catch (err) {
-      $('reconnectPanel').style.display = 'block';
+      markActive($('reconnectPanel'));
       $('reconnectStatus').textContent = contact.name;
       reconnectFailedFallback('could not restore this line\'s identity \u2014 try forgetting and starting fresh');
       return;
     }
 
-    $('reconnectPanel').style.display = 'block';
+    markActive($('reconnectPanel'));
     $('reconnectStatus').textContent = 'Reconnecting to ' + contact.name + '\u2026';
     setStatus('reconnectStatusLine', 'waiting for them to be online\u2026');
     $('btnReconnectRetry').style.display = 'none';
@@ -951,9 +1092,12 @@
         let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
         if (msg && msg.t === 'peer-joined') {
           $('reconnectStatus').textContent = contact.name + ' is back \u2014 reconnecting\u2026';
+          setTimeout(() => { if (conn.status === 'connecting') reconnectFailedFallback('could not reconnect \u2014 try again'); }, NEGOTIATE_TIMEOUT_MS);
           ws.send(await genConnOfferBundle(conn));
         } else if (msg && (msg.t === 'peer-left' || msg.t === 'room-full')) {
-          reconnectFailedFallback('they\'re not there yet \u2014 try again in a moment');
+          // Once we have a pc, the peer's own signaling socket closing (which it does right after
+          // finishing its side) looks identical to a real disconnect \u2014 ignore it once negotiating.
+          if (!conn.pc) reconnectFailedFallback('they\'re not there yet \u2014 try again in a moment');
         } else if (!msg && typeof evt.data === 'string') {
           try {
             const bundle = await acceptConnAnswerBundle(conn, evt.data);
@@ -975,15 +1119,17 @@
       ws.addEventListener('message', async (evt) => {
         let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
         if (msg && msg.t === 'room-full') {
-          reconnectFailedFallback('that room already has two people \u2014 try again shortly');
+          if (!conn.pc) reconnectFailedFallback('that room already has two people \u2014 try again shortly');
         } else if (msg && msg.t === 'peer-left') {
-          reconnectFailedFallback(contact.name + ' disconnected');
+          if (!conn.pc) reconnectFailedFallback(contact.name + ' disconnected');
         } else if (!msg && typeof evt.data === 'string') {
           try {
             $('reconnectStatus').textContent = 'Reconnecting\u2026';
+            setTimeout(() => { if (conn.status === 'connecting') reconnectFailedFallback('could not reconnect \u2014 try again'); }, NEGOTIATE_TIMEOUT_MS);
             const bundle = JSON.parse(atob(evt.data));
             const answerBundle = await genConnAnswerBundle(conn, evt.data);
             ws.send(answerBundle);
+            ws.close();
             if (isTrustedPeer(bundle.pub)) {
               $('step4').style.display = 'none';
             } else {
@@ -998,214 +1144,157 @@
     }
   }
 
-  // ---------- groups ----------
-  $('btnNewGroup').addEventListener('click', () => {
-    $('contactsPanel').style.display = 'none';
-    $('groupName').value = '';
-    const eligible = relayCapableContacts();
-    const picker = $('memberPicker');
-    picker.innerHTML = '';
-    if (eligible.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'member-picker-empty';
-      empty.textContent = 'No short-code lines available yet. Start at least two relay-connected lines first, then come back here.';
-      picker.appendChild(empty);
-    } else {
-      eligible.forEach(c => {
-        const label = document.createElement('label');
-        label.className = 'member-option';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = c.id;
-        const span = document.createElement('span');
-        span.textContent = c.name;
-        label.appendChild(cb);
-        label.appendChild(span);
-        picker.appendChild(label);
-      });
-    }
-    markActive($('newGroupPanel'));
-  });
-  $('btnBackFromNewGroup').addEventListener('click', () => location.reload());
+  // ---------- keep saved lines connected in the background (home screen presence + unread) ----------
+  const BACKGROUND_RETRY_MS = 20000;
+  const NEGOTIATE_TIMEOUT_MS = 15000; // cap on the active WebRTC handshake, once both sides have shown up in the relay room
 
-  $('btnCreateGroup').addEventListener('click', () => {
-    const name = $('groupName').value.trim();
-    if (!name) { $('groupName').focus(); return; }
-    const checked = $('memberPicker').querySelectorAll('input[type=checkbox]:checked');
-    const memberIds = Array.prototype.map.call(checked, cb => cb.value);
-    if (memberIds.length < 2) {
-      alert('Pick at least two lines to make a group.');
-      return;
-    }
-    const groups = getGroups();
-    const id = 'g_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    groups.push({ id: id, name: name, memberIds: memberIds });
-    saveGroups(groups);
-    location.reload();
-  });
-
-  function renderMemberStatusRow(group) {
-    const contacts = getContacts();
-    const row = $('memberStatusRow');
-    row.innerHTML = '';
-    group.memberIds.forEach(mid => {
-      const contact = contacts.filter(c => c.id === mid)[0];
-      const conn = connections[mid];
-      const item = document.createElement('div');
-      item.className = 'member-status-item';
-      const dot = document.createElement('span');
-      dot.className = 'dot' + (conn && conn.status === 'open' ? ' ok' : conn && conn.status === 'failed' ? ' err' : '');
-      const label = document.createElement('span');
-      label.textContent = contact ? contact.name : '(removed)';
-      item.appendChild(dot);
-      item.appendChild(label);
-      row.appendChild(item);
-    });
+  function dropBackgroundConn(conn, reason) {
+    if (connections[conn.contact.id] !== conn) return; // already handled (e.g. taken over in the foreground)
+    console.log('[Aegis bg:' + conn.contact.name + ']', 'dropping connection:', reason);
+    conn.status = 'closed';
+    if (activeCallContactId === conn.contact.id && (inCall || pendingCallOffer)) endCallUI('Call ended.');
+    delete connections[conn.contact.id];
+    try { conn.dc && conn.dc.close(); } catch (e) {}
+    try { conn.pc && conn.pc.close(); } catch (e) {}
+    releaseWakeLockIfIdle();
+    renderHomeLists();
+    setTimeout(() => connectContactInBackground(conn.contact), BACKGROUND_RETRY_MS);
   }
 
-  function openGroup(id) {
-    const group = getGroups().filter(g => g.id === id)[0];
-    if (!group) return;
-    currentView = { type: 'group', groupId: id };
-    $('contactsPanel').style.display = 'none';
-    document.body.classList.add('connected');
-    $('chat').classList.add('active');
-    $('chatHeader').style.display = 'none';
-    $('groupChatHeader').style.display = 'flex';
-    $('groupChatHeaderName').textContent = group.name;
-    $('btnAttach').disabled = true;
-    $('btnCallAudio').disabled = true;
-    $('msgInput').disabled = false;
-    $('btnSend').disabled = false;
-    renderConversationUI(group);
-    renderMemberStatusRow(group);
-
-    const contacts = getContacts();
-    group.memberIds.forEach(mid => {
-      const contact = contacts.filter(c => c.id === mid)[0];
-      if (contact) connectGroupMember(group, contact);
-    });
-  }
-
-  async function connectGroupMember(group, contact) {
-    const conn = { isHost: contact.isHost, usingRelay: true, roomCode: contact.roomCode, showFingerprint: false, status: 'connecting', contact: contact, attachHandlers: null };
-    conn.attachHandlers = () => setupDataChannelHandlersForGroupMember(conn, group);
-    connections[contact.id] = conn;
-    renderMemberStatusRow(group);
-
-    try {
-      conn.myKeyPair = { privateKey: await importPriv(contact.myPriv), publicKey: await importPub(contact.myPub) };
-    } catch (err) {
-      conn.status = 'failed';
-      renderMemberStatusRow(group);
-      return;
-    }
-
-    let ws;
-    try { ws = connectSignalSocket(contact.roomCode); }
-    catch (err) { conn.status = 'failed'; renderMemberStatusRow(group); return; }
-    ws.addEventListener('error', () => { conn.status = 'failed'; renderMemberStatusRow(group); });
-
-    const trustedPeer = contact.peerPub;
-    function isTrustedPeer(pub) { return JSON.stringify(pub) === JSON.stringify(trustedPeer); }
-
-    if (contact.isHost) {
-      ws.addEventListener('message', async (evt) => {
-        let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
-        if (msg && msg.t === 'peer-joined') {
-          ws.send(await genConnOfferBundle(conn));
-        } else if (msg && (msg.t === 'peer-left' || msg.t === 'room-full')) {
-          conn.status = 'failed'; renderMemberStatusRow(group);
-        } else if (!msg && typeof evt.data === 'string') {
-          try {
-            const bundle = await acceptConnAnswerBundle(conn, evt.data);
-            ws.close();
-            if (!isTrustedPeer(bundle.pub)) {
-              conn.status = 'failed';
-              renderMemberStatusRow(group);
-              addMsg(contact.name + '\'s key looks different from last time, so they were not connected to this group for safety. Open their 1:1 line to re-verify.', 'sys');
-              try { conn.pc.close(); } catch (e) {}
-              delete connections[contact.id];
-              return;
-            }
-          } catch (err) {
-            conn.status = 'failed'; renderMemberStatusRow(group);
-          }
-        }
-      });
-    } else {
-      ws.addEventListener('message', async (evt) => {
-        let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
-        if (msg && msg.t === 'room-full') { conn.status = 'failed'; renderMemberStatusRow(group); }
-        else if (msg && msg.t === 'peer-left') { conn.status = 'failed'; renderMemberStatusRow(group); }
-        else if (!msg && typeof evt.data === 'string') {
-          try {
-            const bundle = JSON.parse(atob(evt.data));
-            if (!isTrustedPeer(bundle.pub)) {
-              conn.status = 'failed';
-              renderMemberStatusRow(group);
-              addMsg(contact.name + '\'s key looks different from last time, so they were not connected to this group for safety. Open their 1:1 line to re-verify.', 'sys');
-              return;
-            }
-            const answerBundle = await genConnAnswerBundle(conn, evt.data);
-            ws.send(answerBundle);
-          } catch (err) {
-            conn.status = 'failed'; renderMemberStatusRow(group);
-          }
-        }
-      });
-    }
-  }
-
-  function setupDataChannelHandlersForGroupMember(conn, group) {
+  function setupBackgroundContactHandlers(conn) {
     conn.dc.bufferedAmountLowThreshold = 262144;
+    // The remote side closing abruptly (browser closed, not a clean disconnect) can leave the data
+    // channel's own close event lagging far behind — the peer connection's aggregate state notices
+    // a dead link much sooner, so use it to retry quickly instead of waiting on dc.onclose alone.
+    let disconnectGraceTimer = null;
+    conn.pc.onconnectionstatechange = () => {
+      const state = conn.pc.connectionState;
+      if (state === 'connected' && disconnectGraceTimer) { clearTimeout(disconnectGraceTimer); disconnectGraceTimer = null; }
+      if (state === 'failed') {
+        dropBackgroundConn(conn, 'pc failed');
+      } else if (state === 'disconnected' && !disconnectGraceTimer) {
+        // Brief blips can self-recover — give it a few seconds before treating it as really gone.
+        disconnectGraceTimer = setTimeout(() => {
+          disconnectGraceTimer = null;
+          if (conn.pc.connectionState !== 'connected') dropBackgroundConn(conn, 'pc disconnected');
+        }, 5000);
+      }
+    };
     conn.dc.onopen = () => {
+      console.log('[Aegis bg:' + conn.contact.name + ']', 'data channel OPEN');
       conn.status = 'open';
-      renderMemberStatusRow(group);
       requestWakeLock();
+      renderHomeLists();
     };
-    conn.dc.onclose = () => {
-      conn.status = 'closed';
-      renderMemberStatusRow(group);
-      releaseWakeLockIfIdle();
-    };
+    conn.dc.onclose = () => dropBackgroundConn(conn, 'dc closed');
     conn.dc.onmessage = async (e) => {
       try {
         const obj = await decryptObj(conn.sharedAesKey, e.data);
         if (obj.t === 'text') {
-          addMsg(obj.v, 'them', { senderName: conn.contact.name });
+          saveHistoryEntry(historyKey(conn.contact.id), { text: obj.v, cls: 'them' });
+          bumpUnread(conn.contact.id);
+        } else if (obj.t === 'call-offer') {
+          handleIncomingCallOffer(conn, obj);
+        } else if (obj.t === 'call-answer') {
+          await handleCallAnswer(conn, obj);
+        } else if (obj.t === 'call-decline') {
+          if (activeCallContactId === conn.contact.id) endCallUI('Call declined.');
+        } else if (obj.t === 'call-end') {
+          if (activeCallContactId === conn.contact.id) endCallUI('Call ended.');
         }
-      } catch (err) {
-        addMsg('[could not decrypt a message from ' + conn.contact.name + ']', 'sys');
-      }
+      } catch (err) {}
     };
   }
 
-  $('btnBackToContactsGroup').addEventListener('click', () => {
-    if (currentView && currentView.type === 'group') {
-      const group = getGroups().filter(g => g.id === currentView.groupId)[0];
-      if (group) {
-        group.memberIds.forEach(mid => {
-          const conn = connections[mid];
-          if (conn) { try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {} }
+  function connectContactInBackground(contact) {
+    if (connections[contact.id]) return; // already connecting/open in background or in the foreground
+
+    const log = (...args) => console.log('[Aegis bg:' + contact.name + ']', ...args);
+    log('starting background connect, room', contact.roomCode, 'isHost', contact.isHost);
+
+    const conn = { isHost: contact.isHost, usingRelay: true, roomCode: contact.roomCode, showFingerprint: false, status: 'connecting', contact: contact, attachHandlers: null, ws: null };
+    conn.attachHandlers = () => setupBackgroundContactHandlers(conn);
+    connections[contact.id] = conn;
+    renderHomeLists();
+
+    const fail = (reason) => {
+      if (connections[contact.id] !== conn) return; // already failed/replaced once
+      log('failed:', reason);
+      conn.status = 'failed';
+      renderHomeLists();
+      delete connections[contact.id];
+      // Always release our own relay socket before giving up — an unclosed one sits in the
+      // 2-person room and blocks the real peer (or a later manual reconnect) from ever getting in.
+      try { conn.ws && conn.ws.close(); } catch (e) {}
+      try { conn.pc && conn.pc.close(); } catch (e) {}
+      setTimeout(() => connectContactInBackground(contact), BACKGROUND_RETRY_MS);
+    };
+
+    (async () => {
+      try {
+        conn.myKeyPair = { privateKey: await importPriv(contact.myPriv), publicKey: await importPub(contact.myPub) };
+      } catch (err) { fail('bad stored keys: ' + err.message); return; }
+
+      let ws;
+      try { ws = connectSignalSocket(contact.roomCode); }
+      catch (err) { fail('could not open signaling socket: ' + err.message); return; }
+      conn.ws = ws;
+      ws.addEventListener('open', () => log('signaling socket open, waiting in room'));
+      ws.addEventListener('error', () => fail('signaling socket error'));
+      ws.addEventListener('close', (evt) => log('signaling socket closed', evt.code, evt.reason));
+
+      if (contact.isHost) {
+        ws.addEventListener('message', async (evt) => {
+          let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
+          if (msg && msg.t === 'peer-joined') {
+            log('peer joined, sending offer');
+            // WebRTC negotiation is starting now — cap it so a NAT/ICE failure surfaces as a
+            // retry instead of leaving the line stuck showing "connecting…" forever.
+            setTimeout(() => { if (conn.status === 'connecting') fail('negotiation timed out after offer'); }, NEGOTIATE_TIMEOUT_MS);
+            ws.send(await genConnOfferBundle(conn));
+          } else if (msg && (msg.t === 'peer-left' || msg.t === 'room-full')) {
+            // Once negotiation has started, the peer's own signaling socket closing (which it does
+            // right after finishing its side) looks identical to a real disconnect — ignore it and
+            // let the actual WebRTC connection state (dc open/close, or the timeout above) decide.
+            if (!conn.pc) fail('relay said: ' + msg.t);
+          } else if (!msg && typeof evt.data === 'string') {
+            log('got answer, accepting');
+            try { await acceptConnAnswerBundle(conn, evt.data); ws.close(); }
+            catch (err) { fail('accepting answer threw: ' + err.message); }
+          }
+        });
+      } else {
+        ws.addEventListener('message', async (evt) => {
+          let msg; try { msg = JSON.parse(evt.data); } catch (e) { msg = null; }
+          if (msg && (msg.t === 'room-full' || msg.t === 'peer-left')) {
+            if (!conn.pc) fail('relay said: ' + msg.t);
+          } else if (!msg && typeof evt.data === 'string') {
+            log('got offer, sending answer');
+            try {
+              setTimeout(() => { if (conn.status === 'connecting') fail('negotiation timed out after answer'); }, NEGOTIATE_TIMEOUT_MS);
+              const answerBundle = await genConnAnswerBundle(conn, evt.data);
+              ws.send(answerBundle);
+              ws.close();
+            } catch (err) { fail('generating/sending answer threw: ' + err.message); }
+          }
         });
       }
-    }
-    location.reload();
-  });
-  $('btnForgetGroup').addEventListener('click', () => {
-    if (!currentView || currentView.type !== 'group') return;
-    if (!confirm('Forget this group? Its member lines stay saved, but the group and its shared history will be deleted.')) return;
-    const id = currentView.groupId;
-    const groups = getGroups().filter(g => g.id !== id);
-    saveGroups(groups);
-    localStorage.removeItem(groupHistoryKey(id));
-    Object.keys(connections).forEach(k => {
-      const conn = connections[k];
-      try { conn.dc && conn.dc.close(); conn.pc && conn.pc.close(); } catch (e) {}
-    });
-    location.reload();
-  });
+    })();
+  }
+
+  function closeConnection(id) {
+    const conn = connections[id];
+    if (!conn) return;
+    try { conn.ws && conn.ws.close(); } catch (e) {}
+    try { conn.dc && conn.dc.close(); } catch (e) {}
+    try { conn.pc && conn.pc.close(); } catch (e) {}
+    delete connections[id];
+  }
+
+  function connectAllHomeLines() {
+    relayCapableContacts().forEach(contact => connectContactInBackground(contact));
+  }
 
   renderHomeLists();
+  connectAllHomeLines();
 })();
