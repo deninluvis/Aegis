@@ -13,12 +13,72 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   // ---------- your own identity (shared with peers automatically) ----------
   const USERNAME_KEY = 'aegis_username';
+  const AVATAR_KEY = 'aegis_avatar';
+  const AVATARS = ['🦊', '🐺', '🦉', '🐙', '🦅', '🐢', '🦋', '🐝', '🐬', '🦁', '🐼', '🐨', '🦔', '🐸', '🦄', '🐧'];
   function getUsername() { return localStorage.getItem(USERNAME_KEY) || ''; }
   function setUsername(name) { localStorage.setItem(USERNAME_KEY, name); renderYouRow(); }
+  function getAvatar() { return localStorage.getItem(AVATAR_KEY) || ''; }
+  function setAvatar(a) { localStorage.setItem(AVATAR_KEY, a); renderYouRow(); }
   function renderYouRow() {
-    const el = $('youName');
-    if (el) el.textContent = getUsername() || '(not set)';
+    const nameEl = $('youName');
+    const avatarEl = $('youAvatar');
+    if (nameEl) nameEl.textContent = getUsername() || '(not set)';
+    if (avatarEl) avatarEl.textContent = getAvatar() || '🙂';
   }
+
+  // ---------- login screen (first run, after Reset, or editing your profile) ----------
+  let loginSelectedAvatar = null;
+  function renderAvatarGrid() {
+    const grid = $('avatarGrid');
+    grid.innerHTML = '';
+    AVATARS.forEach(a => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'avatar-option' + (a === loginSelectedAvatar ? ' selected' : '');
+      btn.textContent = a;
+      btn.setAttribute('aria-label', 'Avatar ' + a);
+      btn.addEventListener('click', () => {
+        loginSelectedAvatar = a;
+        Array.from(grid.children).forEach(c => c.classList.remove('selected'));
+        btn.classList.add('selected');
+        updateLoginContinueState();
+      });
+      grid.appendChild(btn);
+    });
+  }
+  function updateLoginContinueState() {
+    $('btnLoginContinue').disabled = !($('loginName').value.trim() && loginSelectedAvatar);
+  }
+  function openLoginScreen(isEdit) {
+    loginSelectedAvatar = getAvatar() || null;
+    $('loginName').value = getUsername();
+    renderAvatarGrid();
+    updateLoginContinueState();
+    $('loginTitle').textContent = isEdit ? 'Edit your profile' : 'Welcome to Aegis';
+    $('loginSub').textContent = isEdit
+      ? 'Update your name or avatar. Anyone you’re still connected with will see the change next time you talk.'
+      : 'Pick a name and an avatar — this is what people you connect with will see. Nothing leaves this device except when you connect to someone.';
+    $('btnLoginContinue').textContent = isEdit ? 'Save' : 'Get started';
+    $('btnLoginCancel').style.display = isEdit ? 'inline-block' : 'none';
+    $('contactsPanel').style.display = 'none';
+    $('loginScreen').style.display = 'flex';
+  }
+  function closeLoginScreen() {
+    $('loginScreen').style.display = 'none';
+    $('contactsPanel').style.display = 'block';
+  }
+  $('loginName').addEventListener('input', updateLoginContinueState);
+  $('btnLoginCancel').addEventListener('click', closeLoginScreen);
+  $('btnLoginContinue').addEventListener('click', () => {
+    const name = $('loginName').value.trim();
+    if (!name || !loginSelectedAvatar) return;
+    setUsername(name);
+    setAvatar(loginSelectedAvatar);
+    closeLoginScreen();
+    renderHomeLists();
+    connectAllHomeLines();
+  });
+  $('btnEditYouName').addEventListener('click', () => openLoginScreen(true));
 
   const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -105,6 +165,15 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   function b64ToBytes(b64) {
     return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
   }
+  // Offer/answer bundles travel as plain (unencrypted) base64 text — unlike encryptObj/decryptObj,
+  // a bare btoa(JSON.stringify(...)) chokes on non-Latin1 characters (e.g. an emoji avatar), so
+  // route them through UTF-8 bytes first.
+  function bundleToB64(obj) {
+    return bytesToB64(new TextEncoder().encode(JSON.stringify(obj)));
+  }
+  function b64ToBundle(b64) {
+    return JSON.parse(new TextDecoder().decode(b64ToBytes(b64)));
+  }
   function fmtSize(n) {
     if (n < 1024) return n + ' B';
     if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
@@ -166,13 +235,14 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
         row.setAttribute('role', 'button');
         const dot = document.createElement('span');
         dot.className = 'dot' + (conn && conn.status === 'open' ? ' ok' : conn && conn.status === 'failed' ? ' err' : '');
+        const avatar = document.createElement('span'); avatar.className = 'contact-avatar'; avatar.textContent = c.avatar || '🙂';
         const name = document.createElement('span'); name.className = 'contact-name'; name.textContent = c.name;
         const meta = document.createElement('span'); meta.className = 'contact-meta';
         meta.textContent = !c.roomCode ? 'manual only'
           : conn && conn.status === 'open' ? 'online'
           : conn && conn.status === 'connecting' ? 'connecting…'
           : 'offline';
-        row.appendChild(dot); row.appendChild(name); row.appendChild(meta);
+        row.appendChild(dot); row.appendChild(avatar); row.appendChild(name); row.appendChild(meta);
         appendUnreadBadge(row, c.id);
         const forgetBtn = document.createElement('button');
         forgetBtn.className = 'contact-forget';
@@ -384,16 +454,17 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     await waitIceComplete(conn.pc);
 
     const pubJwk = await exportPub(conn.myKeyPair.publicKey);
-    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: pubJwk, name: getUsername() }));
+    return bundleToB64({ sdp: conn.pc.localDescription, pub: pubJwk, name: getUsername(), avatar: getAvatar() });
   }
 
   async function acceptConnAnswerBundle(conn, raw) {
-    const bundle = JSON.parse(atob(raw));
+    const bundle = b64ToBundle(raw);
     await conn.pc.setRemoteDescription(bundle.sdp);
     const theirPub = await importPub(bundle.pub);
     conn.sharedAesKey = await deriveShared(conn.myKeyPair.privateKey, theirPub);
     conn.peerPubJwk = bundle.pub;
     conn.peerName = bundle.name || conn.peerName;
+    conn.peerAvatar = bundle.avatar || conn.peerAvatar;
     if (conn.showFingerprint) {
       const myPubJwk = await exportPub(conn.myKeyPair.publicKey);
       renderFingerprint(await combinedFingerprint(myPubJwk, bundle.pub));
@@ -402,7 +473,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
 
   async function genConnAnswerBundle(conn, raw) {
-    const bundle = JSON.parse(atob(raw));
+    const bundle = b64ToBundle(raw);
     if (!conn.myKeyPair) conn.myKeyPair = await genKeyPair();
     conn.pc = new RTCPeerConnection(STUN);
     setupPeerConnectionMediaHandlers(conn.pc);
@@ -419,13 +490,14 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     conn.sharedAesKey = await deriveShared(conn.myKeyPair.privateKey, theirPub);
     conn.peerPubJwk = bundle.pub;
     conn.peerName = bundle.name || conn.peerName;
+    conn.peerAvatar = bundle.avatar || conn.peerAvatar;
     if (conn.showFingerprint) {
       const myPubJwk = await exportPub(conn.myKeyPair.publicKey);
       renderFingerprint(await combinedFingerprint(myPubJwk, bundle.pub));
     }
 
     const myPubJwk2 = await exportPub(conn.myKeyPair.publicKey);
-    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: myPubJwk2, name: getUsername() }));
+    return bundleToB64({ sdp: conn.pc.localDescription, pub: myPubJwk2, name: getUsername(), avatar: getAvatar() });
   }
 
   // ---------- 1:1 data channel handlers (new line + reconnect) ----------
@@ -434,17 +506,18 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     if (currentView && currentView.type === 'contact' && conn.contact && conn.contact.id) {
       const c = contacts.find(x => x.id === conn.contact.id);
       if (c && conn.peerPubJwk) { c.peerPub = conn.peerPubJwk; saveContacts(contacts); }
-      if (c && conn.peerName && conn.peerName !== c.name) {
-        c.name = conn.peerName; saveContacts(contacts);
-        conn.contact.name = conn.peerName;
-        $('chatHeaderName').textContent = conn.peerName;
+      if (c && ((conn.peerName && conn.peerName !== c.name) || (conn.peerAvatar && conn.peerAvatar !== c.avatar))) {
+        if (conn.peerName) c.name = conn.peerName;
+        if (conn.peerAvatar) c.avatar = conn.peerAvatar;
+        saveContacts(contacts);
+        Object.assign(conn.contact, { name: c.name, avatar: c.avatar });
       }
       connections[c ? c.id : conn.contact.id] = conn;
       renderConversationUI(c || conn.contact);
       return;
     }
     const id = 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const contact = { id: id, name: conn.peerName || 'Unnamed', isHost: conn.isHost, roomCode: conn.usingRelay ? conn.roomCode : null, peerPub: conn.peerPubJwk, myPub: null, myPriv: null };
+    const contact = { id: id, name: conn.peerName || 'Unnamed', avatar: conn.peerAvatar || '', isHost: conn.isHost, roomCode: conn.usingRelay ? conn.roomCode : null, peerPub: conn.peerPubJwk, myPub: null, myPriv: null };
     if (conn.myKeyPair) {
       try {
         contact.myPub = await exportPub(conn.myKeyPair.publicKey);
@@ -461,6 +534,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   function renderConversationUI(contact) {
     $('chatHeaderName').textContent = contact.name;
+    $('chatHeaderAvatar').textContent = contact.avatar || '🙂';
     const log = $('chatLog');
     log.innerHTML = '';
     renderSavedHistory(currentHistoryKey());
@@ -855,11 +929,6 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     markActive($('step1'));
   });
   $('btnBackToContacts').addEventListener('click', () => location.reload());
-  $('btnEditYouName').addEventListener('click', () => {
-    const current = getUsername();
-    const name = (prompt('Your name (shown to people you connect with):', current) || '').trim();
-    if (name) setUsername(name);
-  });
 
   $('btnClearEverything').addEventListener('click', () => {
     if (!confirm('Erase everything? This deletes every saved line and message history from this device. This cannot be undone.')) return;
@@ -1208,7 +1277,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
           try {
             $('reconnectStatus').textContent = 'Reconnecting\u2026';
             setTimeout(() => { if (conn.status === 'connecting') reconnectFailedFallback('could not reconnect \u2014 try again'); }, NEGOTIATE_TIMEOUT_MS);
-            const bundle = JSON.parse(atob(evt.data));
+            const bundle = b64ToBundle(evt.data);
             const answerBundle = await genConnAnswerBundle(conn, evt.data);
             ws.send(answerBundle);
             ws.close();
@@ -1265,11 +1334,15 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     conn.dc.onopen = () => {
       console.log('[Aegis bg:' + conn.contact.name + ']', 'data channel OPEN');
       conn.status = 'open';
-      if (conn.peerName && conn.peerName !== conn.contact.name) {
+      if ((conn.peerName && conn.peerName !== conn.contact.name) || (conn.peerAvatar && conn.peerAvatar !== conn.contact.avatar)) {
         const contacts = getContacts();
         const c = contacts.find(x => x.id === conn.contact.id);
-        if (c) { c.name = conn.peerName; saveContacts(contacts); }
-        conn.contact.name = conn.peerName;
+        if (c) {
+          if (conn.peerName) c.name = conn.peerName;
+          if (conn.peerAvatar) c.avatar = conn.peerAvatar;
+          saveContacts(contacts);
+          Object.assign(conn.contact, { name: c.name, avatar: c.avatar });
+        }
       }
       requestWakeLock();
       flushOutbox(conn);
@@ -1387,7 +1460,12 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     relayCapableContacts().forEach(contact => connectContactInBackground(contact));
   }
 
-  renderYouRow();
-  renderHomeLists();
-  connectAllHomeLines();
+  if (!getUsername() || !getAvatar()) {
+    openLoginScreen(false);
+  } else {
+    $('contactsPanel').style.display = 'block';
+    renderYouRow();
+    renderHomeLists();
+    connectAllHomeLines();
+  }
 })();

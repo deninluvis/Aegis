@@ -97,6 +97,10 @@
   .contact-row:hover{border-color:var(--brass-dim);}
   .contact-row:focus-visible{outline:2px solid var(--brass-dim); outline-offset:2px;}
   .contact-row .dot{width:8px; height:8px; flex-shrink:0;}
+  .contact-avatar{
+    width:26px; height:26px; border-radius:50%; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;
+  }
   .contact-row .contact-name{
     flex:1; min-width:0; font-size:14px; color:var(--paper); font-weight:500;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -126,6 +130,32 @@
   }
   .you-row strong{color:var(--paper); font-weight:500;}
   .you-row button{padding:6px 11px; font-size:11px;}
+  .you-id{display:flex; align-items:center; gap:8px;}
+  .you-avatar{
+    width:24px; height:24px; border-radius:50%; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;
+  }
+
+  /* ---------- login / profile setup ---------- */
+  .login-screen{
+    position:fixed; inset:0; z-index:50; background:var(--ink);
+    display:flex; align-items:center; justify-content:center;
+    padding:24px; padding-top:max(24px, env(safe-area-inset-top)); padding-bottom:max(24px, env(safe-area-inset-bottom));
+  }
+  .login-card{width:100%; max-width:420px;}
+  .login-card h2{font-size:clamp(24px,6vw,30px); margin:0 0 10px; color:var(--paper);}
+  .login-sub{color:var(--paper-dim); font-size:13px; line-height:1.6; margin:0 0 20px;}
+  .avatar-grid{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:10px;
+    margin-top:16px;
+  }
+  .avatar-option{
+    aspect-ratio:1; border-radius:50%; border:1px solid var(--line); background:var(--panel);
+    font-size:24px; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .avatar-option:hover{border-color:var(--brass-dim);}
+  .avatar-option.selected{border-color:var(--brass); background:rgba(198,146,79,.15);}
+  .login-card .row{margin-top:22px;}
   /* ---------- name input / back link ---------- */
   .name-input{
     width:100%; background:var(--ink); color:var(--paper); border:1px solid var(--line);
@@ -142,6 +172,10 @@
     display:flex; align-items:center; gap:10px; margin-bottom:12px;
   }
   .chat-header .back-link{padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:15px;}
+  .chat-header-avatar{
+    width:28px; height:28px; border-radius:50%; border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0;
+  }
   .chat-header-name{
     flex:1; min-width:0; font-family:'Fraunces', serif; font-size:16px; font-weight:600; color:var(--paper);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;

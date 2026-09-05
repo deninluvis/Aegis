@@ -19,6 +19,20 @@
 <body>
 <div class="wrap">
 
+  <!-- LOGIN / PROFILE SETUP (shown on first visit, after Reset, or when editing your profile) -->
+  <div class="login-screen" id="loginScreen" style="display:none">
+    <div class="login-card">
+      <h2 id="loginTitle">Welcome to Aegis</h2>
+      <p class="login-sub" id="loginSub">Pick a name and an avatar — this is what people you connect with will see. Nothing leaves this device except when you connect to someone.</p>
+      <input type="text" id="loginName" class="name-input" placeholder="Your name" maxlength="40" autocomplete="off">
+      <div class="avatar-grid" id="avatarGrid"></div>
+      <div class="row">
+        <button class="primary" id="btnLoginContinue" disabled>Get started</button>
+        <button id="btnLoginCancel" style="display:none">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <header class="top">
     <button class="reset-link" id="btnClearEverything">Reset</button>
     <h1>Aegis</h1>
@@ -48,10 +62,10 @@
   </div>
 
   <!-- CONTACTS HOME -->
-  <div class="contacts-panel" id="contactsPanel">
+  <div class="contacts-panel" id="contactsPanel" style="display:none">
     <div class="you-row">
-      <span>You are <strong id="youName">—</strong></span>
-      <button id="btnEditYouName">Change</button>
+      <span class="you-id"><span class="you-avatar" id="youAvatar">🙂</span>You are <strong id="youName">—</strong></span>
+      <button id="btnEditYouName">Edit</button>
     </div>
     <div class="panel-section-label">Lines</div>
     <div class="contacts-list" id="contactsList"></div>
@@ -228,6 +242,7 @@
 
   <div class="chat-header" id="chatHeader" style="display:none">
     <button id="btnBackToContactsChat" class="back-link" title="Back to contacts" aria-label="Back to contacts">←</button>
+    <span class="chat-header-avatar" id="chatHeaderAvatar">🙂</span>
     <span class="chat-header-name" id="chatHeaderName">—</span>
     <button id="btnForgetLine" class="forget-link">Forget this line</button>
   </div>
