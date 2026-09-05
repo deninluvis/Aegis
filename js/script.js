@@ -85,6 +85,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     setAvatar(loginSelectedAvatar);
     closeLoginScreen();
     renderNotifRow();
+    renderInstallBanner();
     renderHomeLists();
     connectAllHomeLines();
   });
@@ -156,6 +157,60 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       if (contactId) openContact(contactId);
     });
   }
+
+  // ---------- install prompt (Add to Home Screen) ----------
+  const INSTALL_DISMISSED_KEY = 'aegis_install_dismissed';
+  let deferredInstallPrompt = null;
+
+  function isStandaloneApp() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+  function isIOSDevice() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  }
+  function renderInstallBanner() {
+    const banner = $('installBanner');
+    if (!banner) return;
+    if (isStandaloneApp() || localStorage.getItem(INSTALL_DISMISSED_KEY)) {
+      banner.style.display = 'none';
+      return;
+    }
+    if (deferredInstallPrompt) {
+      // Chrome/Edge/Android: a real, one-tap install prompt is available.
+      $('installBannerText').textContent = 'Install Aegis for quick access and reliable notifications.';
+      $('btnInstallApp').style.display = 'inline-block';
+      banner.style.display = 'flex';
+    } else if (isIOSDevice()) {
+      // Safari never fires beforeinstallprompt — the only path is the manual Share sheet.
+      $('installBannerText').textContent = 'Install Aegis: tap the Share icon, then "Add to Home Screen".';
+      $('btnInstallApp').style.display = 'none';
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    renderInstallBanner();
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+    renderInstallBanner();
+  });
+  $('btnInstallApp').addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const choice = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (choice.outcome === 'accepted') localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+    renderInstallBanner();
+  });
+  $('btnDismissInstall').addEventListener('click', () => {
+    localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+    renderInstallBanner();
+  });
 
   // ---------- crypto helpers ----------
   async function genKeyPair() {
@@ -1591,6 +1646,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     $('contactsPanel').style.display = 'block';
     renderYouRow();
     renderNotifRow();
+    renderInstallBanner();
     renderHomeLists();
     connectAllHomeLines();
     if ('Notification' in window && Notification.permission === 'granted') registerPushForAllContacts();
