@@ -36,7 +36,7 @@
   <header class="top">
     <button class="reset-link" id="btnClearEverything">Reset</button>
     <h1>Aegis</h1>
-    <p>A direct line between two browsers. No account, no server relaying your messages, no third party holding a key. Connection details and encryption keys pass hand-to-hand — you copy them to the other person yourself.</p>
+    <p>A direct line between two browsers. No account, no server relaying your messages, no third party holding a key. Connection details and encryption keys exchange automatically over a short code — a small relay forwards only the handshake, never your messages.</p>
     <div class="badge-row">
       <span class="badge">Peer to peer</span>
       <span class="badge">ECDH · AES-256-GCM</span>
@@ -94,82 +94,6 @@
       <div class="role-pick">
         <button class="primary" id="btnHost">I'll start the line</button>
         <button id="btnJoin">I'm joining a line</button>
-      </div>
-      <label class="relay-toggle">
-        <input type="checkbox" id="useRelay">
-        Connect automatically with a short code, instead of copy-paste (uses a small relay server)
-      </label>
-    </div>
-  </div>
-
-  <!-- STEP 2: HOST -->
-  <div class="step" id="step2host" style="display:none">
-    <div class="step-head">
-      <div class="step-num">2</div>
-      <div>
-        <div class="step-title">Send this to the other person</div>
-        <div class="step-sub">Contains your connection info and your public key. Safe to send in plain text — it can't be used to decrypt anything by itself.</div>
-      </div>
-    </div>
-    <div class="step-body">
-      <button id="btnCreateOffer">Generate invite</button>
-      <textarea id="offerOut" readonly placeholder="Your invite will appear here…"></textarea>
-      <div class="row">
-        <button id="copyOffer" disabled>Copy invite</button>
-        <span class="status-line" id="offerStatus"><span class="dot"></span>waiting</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- STEP 3: HOST -->
-  <div class="step" id="step3host" style="display:none">
-    <div class="step-head">
-      <div class="step-num">3</div>
-      <div>
-        <div class="step-title">Paste their reply</div>
-        <div class="step-sub">Once they send back their reply blob, paste it here.</div>
-      </div>
-    </div>
-    <div class="step-body">
-      <textarea id="answerIn" placeholder="Paste their reply here…"></textarea>
-      <div class="row">
-        <button class="primary" id="btnAcceptAnswer">Connect</button>
-        <span class="status-line" id="connectStatusHost"><span class="dot"></span>not connected</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- STEP 2: JOIN -->
-  <div class="step" id="step2join" style="display:none">
-    <div class="step-head">
-      <div class="step-num">2</div>
-      <div>
-        <div class="step-title">Paste their invite</div>
-        <div class="step-sub">Paste the blob the other person sent you.</div>
-      </div>
-    </div>
-    <div class="step-body">
-      <textarea id="offerIn" placeholder="Paste their invite here…"></textarea>
-      <div class="row">
-        <button class="primary" id="btnCreateAnswer">Generate reply</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- STEP 3: JOIN -->
-  <div class="step" id="step3join" style="display:none">
-    <div class="step-head">
-      <div class="step-num">3</div>
-      <div>
-        <div class="step-title">Send this back</div>
-        <div class="step-sub">Send this reply to them. Once they accept it, the line connects.</div>
-      </div>
-    </div>
-    <div class="step-body">
-      <textarea id="answerOut" readonly placeholder="Your reply will appear here…"></textarea>
-      <div class="row">
-        <button id="copyAnswer" disabled>Copy reply</button>
-        <span class="status-line" id="connectStatusJoin"><span class="dot"></span>waiting for them to connect</span>
       </div>
     </div>
   </div>
@@ -276,7 +200,7 @@
   </div>
 
   <footer>
-    Keys are generated fresh in your browser and never leave it — only public keys travel in the invite/reply text. Files are sent directly over the same encrypted line, in chunks — they aren't relayed anywhere. Voice calls connect the same way: audio streams directly between your two browsers, encrypted end-to-end by WebRTC itself, with call setup messages passed over the already-encrypted data channel. Local history keeps a note of which files were sent or received, and when calls happened, not the file or call contents themselves, kept separately for each contact. This uses public STUN servers only to help two devices on different networks find each other; no message, key, file, or call data ever passes through them. The optional short-code connect mode uses a small relay server to forward the invite/reply handshake automatically instead of copy-paste, and lets a saved contact reconnect later — it still can't read your messages, but unlike hand-to-hand copy-paste it does briefly see each connection setup, so always check the pattern matches on both screens before trusting a line. Contacts made via manual copy-paste can't reconnect automatically and will need a fresh exchange each time. "Forget this line" permanently deletes that saved identity and history from this device.
+    Keys are generated fresh in your browser and never leave it — only public keys travel in the handshake. Files are sent directly over the same encrypted line, in chunks — they aren't relayed anywhere. Voice calls connect the same way: audio streams directly between your two browsers, encrypted end-to-end by WebRTC itself, with call setup messages passed over the already-encrypted data channel. Local history keeps a note of which files were sent or received, and when calls happened, not the file or call contents themselves, kept separately for each contact. This uses public STUN servers only to help two devices on different networks find each other; no message, key, file, or call data ever passes through them. Connecting uses a small relay server to forward the handshake automatically with a short code, and lets a saved contact reconnect later — it still can't read your messages, but it does briefly see each connection setup, so always check the pattern matches on both screens before trusting a line. "Forget this line" permanently deletes that saved identity and history from this device.
   </footer>
 </div>
 

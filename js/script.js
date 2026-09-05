@@ -627,7 +627,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       $('btnAttach').disabled = false;
       $('btnCallAudio').disabled = false;
       document.body.classList.add('connected');
-      ['step1', 'step2host', 'step3host', 'step2join', 'step3join', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel', 'contactsPanel'].forEach(id => {
+      ['step1', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel', 'contactsPanel'].forEach(id => {
         $(id).style.display = 'none';
       });
       $('chatHeader').style.display = 'flex';
@@ -636,8 +636,6 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       await flushOutbox(conn);
 
       addMsg('Line connected. Messages below are end-to-end encrypted.', 'sys');
-      if (conn.isHost) setStatus('connectStatusHost', 'connected', 'ok');
-      else setStatus('connectStatusJoin', 'connected', 'ok');
       requestWakeLock();
     };
     conn.dc.onclose = () => {
@@ -965,7 +963,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   // ---------- contacts home navigation ----------
   function goHome() {
     currentView = null;
-    ['step1', 'step2host', 'step3host', 'step2join', 'step3join', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel'].forEach(id => {
+    ['step1', 'step2hostRelay', 'step2joinRelay', 'reconnectPanel'].forEach(id => {
       $(id).style.display = 'none';
     });
     document.body.classList.remove('connected');
@@ -983,7 +981,6 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   function resetNewLineUI() {
     refreshStep1Identity();
-    $('useRelay').checked = false;
     $('btnHost').disabled = false;
     $('btnJoin').disabled = false;
   }
@@ -1039,62 +1036,12 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   $('btnHost').addEventListener('click', () => {
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
-    if ($('useRelay').checked) markActive($('step2hostRelay'));
-    else markActive($('step2host'));
+    markActive($('step2hostRelay'));
   });
   $('btnJoin').addEventListener('click', () => {
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
-    if ($('useRelay').checked) markActive($('step2joinRelay'));
-    else markActive($('step2join'));
-  });
-
-  // ---------- HOST flow (manual copy-paste, new line) ----------
-  let draftConn = null;
-  $('btnCreateOffer').addEventListener('click', async () => {
-    $('btnCreateOffer').disabled = true;
-    setStatus('offerStatus', 'generating\u2026');
-    draftConn = { isHost: true, usingRelay: false, showFingerprint: true, attachHandlers: null };
-    draftConn.attachHandlers = () => setupDataChannelHandlersForContact(draftConn);
-    $('offerOut').value = await genConnOfferBundle(draftConn);
-    $('copyOffer').disabled = false;
-    setStatus('offerStatus', 'ready to send', 'ok');
-    markActive($('step3host'));
-  });
-  $('copyOffer').addEventListener('click', () => {
-    navigator.clipboard.writeText($('offerOut').value);
-    $('copyOffer').textContent = 'Copied';
-    setTimeout(() => $('copyOffer').textContent = 'Copy invite', 1500);
-  });
-
-  $('btnAcceptAnswer').addEventListener('click', async () => {
-    try {
-      await acceptConnAnswerBundle(draftConn, $('answerIn').value.trim());
-      markDone($('step3host'));
-      markActive($('step4'));
-      setStatus('connectStatusHost', 'connecting\u2026');
-    } catch (err) {
-      setStatus('connectStatusHost', 'that reply didn\'t parse \u2014 check it was copied in full', 'err');
-    }
-  });
-
-  // ---------- JOIN flow (manual copy-paste, new line) ----------
-  $('btnCreateAnswer').addEventListener('click', async () => {
-    try {
-      const conn = { isHost: false, usingRelay: false, showFingerprint: true, attachHandlers: null };
-      conn.attachHandlers = () => setupDataChannelHandlersForContact(conn);
-      $('answerOut').value = await genConnAnswerBundle(conn, $('offerIn').value.trim());
-      $('copyAnswer').disabled = false;
-      markActive($('step3join'));
-      markActive($('step4'));
-    } catch (err) {
-      alert('That invite didn\'t parse \u2014 check it was copied in full.');
-    }
-  });
-  $('copyAnswer').addEventListener('click', () => {
-    navigator.clipboard.writeText($('answerOut').value);
-    $('copyAnswer').textContent = 'Copied';
-    setTimeout(() => $('copyAnswer').textContent = 'Copy reply', 1500);
+    markActive($('step2joinRelay'));
   });
 
   // ---------- RELAY flow (automatic, via Cloudflare Worker signaling server) ----------
