@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Aegis WS diagnostic</title>
+<style>
+  body{background:#12151C;color:#E9E4D8;font-family:ui-monospace,monospace;padding:20px;font-size:13px;line-height:1.6;}
+  h1{font-size:16px;}
+  pre{white-space:pre-wrap;word-break:break-word;background:#181C25;border:1px solid #2B3140;border-radius:8px;padding:12px;}
+  button{font-family:inherit;padding:10px 16px;margin:6px 6px 6px 0;border-radius:6px;border:1px solid #2B3140;background:#1F2430;color:#E9E4D8;}
+</style>
+<h1>Aegis WebSocket diagnostic</h1>
+<p>This page does nothing but try two WebSocket connections and report exactly what happens — no app logic involved.</p>
+<button id="run">Run both tests</button>
+<pre id="log">(not run yet)</pre>
+<script>
+const logEl = document.getElementById('log');
+function log(s) {
+  logEl.textContent += (logEl.textContent === '(not run yet)' ? '' : '\n') + s;
+  logEl.textContent = logEl.textContent.replace('(not run yet)', '');
+}
+function testSocket(label, url) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    log('[' + label + '] connecting to ' + url);
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      log('[' + label + '] threw synchronously: ' + err.message);
+      resolve();
+      return;
+    }
+    ws.onopen = () => {
+      log('[' + label + '] OPEN after ' + Math.round(performance.now() - t0) + 'ms');
+      ws.close();
+    };
+    ws.onerror = () => {
+      log('[' + label + '] ERROR event after ' + Math.round(performance.now() - t0) + 'ms (browsers hide the real reason on this event — see the close code below)');
+    };
+    ws.onclose = (e) => {
+      log('[' + label + '] CLOSE after ' + Math.round(performance.now() - t0) + 'ms — code=' + e.code + ' reason="' + e.reason + '" wasClean=' + e.wasClean);
+      resolve();
+    };
+    setTimeout(() => {
+      if (ws.readyState !== WebSocket.CLOSED) {
+        log('[' + label + '] still open/connecting after 8s, giving up on this test');
+        resolve();
+      }
+    }, 8000);
+  });
+}
+
+document.getElementById('run').addEventListener('click', async () => {
+  logEl.textContent = '';
+  const room = 'DBG' + Math.random().toString(36).slice(2, 8).toUpperCase();
+  await testSocket('aegis relay', 'wss://aegis-signal.deninluvis.workers.dev/?room=' + room);
+  log('');
+  await testSocket('public echo server (postman-echo.com)', 'wss://ws.postman-echo.com/raw');
+  log('');
+  log('Done. Send a screenshot or copy of this log back.');
+});
+</script>
