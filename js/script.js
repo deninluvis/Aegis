@@ -75,10 +75,56 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     setUsername(name);
     setAvatar(loginSelectedAvatar);
     closeLoginScreen();
+    renderNotifRow();
     renderHomeLists();
     connectAllHomeLines();
   });
   $('btnEditYouName').addEventListener('click', () => openLoginScreen(true));
+
+  // ---------- notifications (local only — nothing here ever touches a server) ----------
+  function renderNotifRow() {
+    const stateEl = $('notifState');
+    const btn = $('btnEnableNotifs');
+    if (!stateEl || !btn) return;
+    if (!('Notification' in window)) {
+      stateEl.textContent = 'not supported';
+      btn.style.display = 'none';
+      return;
+    }
+    const perm = Notification.permission;
+    stateEl.textContent = perm === 'granted' ? 'on' : perm === 'denied' ? 'blocked' : 'off';
+    btn.textContent = perm === 'granted' ? 'On' : perm === 'denied' ? 'Blocked' : 'Enable';
+    btn.disabled = perm !== 'default';
+  }
+  $('btnEnableNotifs').addEventListener('click', async () => {
+    if (!('Notification' in window)) return;
+    try { await Notification.requestPermission(); } catch (e) {}
+    renderNotifRow();
+  });
+  function contactNotifTitle(contact) {
+    return (contact.avatar ? contact.avatar + ' ' : '') + contact.name;
+  }
+  // Fires for a message/call on a line that isn't the one currently on screen (or the tab is
+  // hidden entirely) — never for the conversation you're actively looking at in a visible tab.
+  async function notifyForContact(contact, title, body, tagSuffix) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible' && isViewingContact(contact.id)) return;
+    const opts = { body: body, tag: 'aegis-' + contact.id + '-' + (tagSuffix || 'msg'), icon: 'icon-192.png', data: { contactId: contact.id } };
+    // Mobile Chrome/Safari reject the page-level Notification() constructor outright and require
+    // going through an active service worker instead — try that first, and only fall back to the
+    // constructor (desktop browsers without an active registration yet) if it's unavailable.
+    if (navigator.serviceWorker) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.showNotification(title, opts);
+        return;
+      } catch (e) {}
+    }
+    try {
+      const n = new Notification(title, opts);
+      n.onclick = () => { window.focus(); n.close(); openContact(contact.id); };
+    } catch (e) {}
+  }
 
   const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -86,6 +132,11 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'aegis-notification-click' && e.data.contactId) {
+        openContact(e.data.contactId);
+      }
     });
   }
 
@@ -617,7 +668,10 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   async function handleContactMessage(conn, obj) {
     if (obj.t === 'text') {
-      if (!historyHasId(historyKey(conn.contact.id), obj.id)) addMsg(obj.v, 'them', { id: obj.id });
+      if (!historyHasId(historyKey(conn.contact.id), obj.id)) {
+        addMsg(obj.v, 'them', { id: obj.id });
+        notifyForContact(conn.contact, contactNotifTitle(conn.contact), obj.v);
+      }
     } else if (obj.t === 'file-start') {
       incoming[obj.id] = { name: obj.name, size: obj.size, mime: obj.mime, chunks: new Array(obj.chunks), received: 0 };
       addMsg('Receiving file: ' + obj.name + ' (' + fmtSize(obj.size) + ')\u2026', 'sys');
@@ -799,6 +853,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     pendingCallOffer = obj;
     $('callStatus').textContent = 'Incoming voice call from ' + conn.contact.name + '\u2026';
     setCallView('incoming');
+    notifyForContact(conn.contact, contactNotifTitle(conn.contact), 'Incoming voice call\u2026', 'call');
   }
 
   async function acceptCall() {
@@ -1357,6 +1412,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
           if (!historyHasId(key, obj.id)) {
             saveHistoryEntry(key, { id: obj.id, text: obj.v, cls: 'them' });
             bumpUnread(conn.contact.id);
+            notifyForContact(conn.contact, contactNotifTitle(conn.contact), obj.v);
           }
         } else if (obj.t === 'call-offer') {
           handleIncomingCallOffer(conn, obj);
@@ -1465,6 +1521,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   } else {
     $('contactsPanel').style.display = 'block';
     renderYouRow();
+    renderNotifRow();
     renderHomeLists();
     connectAllHomeLines();
   }
