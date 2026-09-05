@@ -110,6 +110,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     if (!('Notification' in window)) return;
     try { await Notification.requestPermission(); } catch (e) {}
     renderNotifRow();
+    if (Notification.permission === 'granted') registerPushForAllContacts();
   });
   function contactNotifTitle(contact) {
     return (contact.avatar ? contact.avatar + ' ' : '') + contact.name;
@@ -144,9 +145,15 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       navigator.serviceWorker.register('sw.js').catch(() => {});
     });
     navigator.serviceWorker.addEventListener('message', (e) => {
-      if (e.data && e.data.type === 'aegis-notification-click' && e.data.contactId) {
-        openContact(e.data.contactId);
+      if (!e.data || e.data.type !== 'aegis-notification-click') return;
+      let contactId = e.data.contactId;
+      if (!contactId && e.data.roomCode) {
+        // Came from a real push, not a local notification — the server-side ping only
+        // knows the room code, so resolve it to whichever local contact owns that room.
+        const match = getContacts().find(c => c.roomCode === e.data.roomCode);
+        if (match) contactId = match.id;
       }
+      if (contactId) openContact(contactId);
     });
   }
 
@@ -591,6 +598,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     currentView = { type: 'contact', contactId: id };
     connections[id] = conn;
     renderConversationUI(contact);
+    if ('Notification' in window && Notification.permission === 'granted') registerPushForContact(contact);
   }
 
   function renderConversationUI(contact) {
@@ -951,6 +959,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     // If the line isn't open yet (still reconnecting), queue the message as pending instead of
     // dropping it — it gets sent automatically once the data channel opens (see flushOutbox).
     if (open) conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', id: id, v: text }));
+    else notifyPeerViaPush(currentView.contactId);
 
     addMsg(text, 'me', { id: id, pending: !open });
     input.value = '';
@@ -1099,6 +1108,8 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   // ---------- RELAY flow (automatic, via Cloudflare Worker signaling server) ----------
   const SIGNAL_URL = 'wss://aegis-signal.deninluvis.workers.dev';
+  const SIGNAL_HTTP = SIGNAL_URL.replace('wss://', 'https://');
+  const VAPID_PUBLIC_KEY = 'BEx22de41LmQa0w6ZnUuGeNc2v1Utt7XGVn6JxPt_zsQNVzynCzOwoV_JzL7zHfzEl4I2U4HnngziRxwnvmc6jc';
 
   function randomRoomCode() {
     const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -1108,6 +1119,60 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
   function connectSignalSocket(room) {
     return new WebSocket(SIGNAL_URL + '?room=' + encodeURIComponent(room));
+  }
+
+  // ---------- always-on push (wakes the recipient even if the app/tab isn't running) ----------
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+  async function ensurePushSubscribed() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+    if (Notification.permission !== 'granted') return null;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+      return sub;
+    } catch (e) { console.warn('[Aegis] push subscribe failed:', e); return null; }
+  }
+  // Tells the relay "here's where to reach this device" for this specific contact's
+  // room — stored there so a wake-up push can find it later, even after this device
+  // goes offline. No message content ever travels this path.
+  async function registerPushForContact(contact) {
+    if (!contact.roomCode) return; // manual (long-code) contacts have no relay room
+    const sub = await ensurePushSubscribed();
+    if (!sub) return;
+    try {
+      await fetch(SIGNAL_HTTP + '/register-push?room=' + encodeURIComponent(contact.roomCode), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: contact.isHost ? 'host' : 'join', subscription: sub.toJSON() }),
+      });
+    } catch (e) {}
+  }
+  function registerPushForAllContacts() {
+    relayCapableContacts().forEach(c => registerPushForContact(c));
+  }
+  // Fired when a message gets queued as pending because the peer isn't reachable
+  // directly right now — asks the relay to wake their device instead.
+  function notifyPeerViaPush(contactId) {
+    const contact = getContacts().find(c => c.id === contactId);
+    if (!contact || !contact.roomCode) return;
+    fetch(SIGNAL_HTTP + '/notify?room=' + encodeURIComponent(contact.roomCode), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: contact.isHost ? 'host' : 'join', name: getUsername(), avatar: getAvatar() }),
+    }).catch(() => {});
   }
 
   // HOST side of the relay (new line)
@@ -1528,5 +1593,6 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     renderNotifRow();
     renderHomeLists();
     connectAllHomeLines();
+    if ('Notification' in window && Notification.permission === 'granted') registerPushForAllContacts();
   }
 })();
