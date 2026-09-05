@@ -983,7 +983,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   function resetNewLineUI() {
     refreshStep1Identity();
-    $('useRelay').checked = false;
+    $('useLongCode').checked = false;
     $('btnHost').disabled = false;
     $('btnJoin').disabled = false;
   }
@@ -1039,14 +1039,14 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   $('btnHost').addEventListener('click', () => {
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
-    if ($('useRelay').checked) markActive($('step2hostRelay'));
-    else markActive($('step2host'));
+    if ($('useLongCode').checked) markActive($('step2host'));
+    else markActive($('step2hostRelay'));
   });
   $('btnJoin').addEventListener('click', () => {
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
-    if ($('useRelay').checked) markActive($('step2joinRelay'));
-    else markActive($('step2join'));
+    if ($('useLongCode').checked) markActive($('step2join'));
+    else markActive($('step2joinRelay'));
   });
 
   // ---------- HOST flow (manual copy-paste, new line) ----------
