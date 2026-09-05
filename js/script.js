@@ -9,8 +9,16 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   const connections = {};
   const unreadCounts = {}; // contactId -> unread message count (in-memory, resets on reload)
   let currentView = null; // { type: 'contact', contactId }
-  let pendingLineName = null;
   let pendingReconnectContactId = null;
+
+  // ---------- your own identity (shared with peers automatically) ----------
+  const USERNAME_KEY = 'aegis_username';
+  function getUsername() { return localStorage.getItem(USERNAME_KEY) || ''; }
+  function setUsername(name) { localStorage.setItem(USERNAME_KEY, name); renderYouRow(); }
+  function renderYouRow() {
+    const el = $('youName');
+    if (el) el.textContent = getUsername() || '(not set)';
+  }
 
   const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -197,6 +205,13 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     localStorage.setItem(key, JSON.stringify(hist));
     if (key === currentHistoryKey()) updateHistoryBar(key); // don't repaint the bar for a background contact's history
   }
+  function historyHasId(key, id) {
+    if (!key || !id) return false;
+    return loadHistory(key).some(m => m.id === id);
+  }
+  function genMsgId() {
+    return 'm_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
   function updateHistoryBar(key) {
     const hist = loadHistory(key);
     const bar = $('historyBar');
@@ -210,10 +225,17 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     const log = $('chatLog');
     hist.forEach(m => {
       const div = document.createElement('div');
-      div.className = 'msg ' + m.cls;
+      div.className = 'msg ' + m.cls + (m.pending ? ' pending' : '');
+      if (m.id) div.dataset.msgId = m.id;
       const body = document.createElement('div');
       body.textContent = m.text;
       div.appendChild(body);
+      if (m.pending) {
+        const status = document.createElement('div');
+        status.className = 'msg-status';
+        status.textContent = 'sending…';
+        div.appendChild(status);
+      }
       log.appendChild(div);
     });
     const divider = document.createElement('div');
@@ -240,16 +262,31 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     opts = opts || {};
     const log = $('chatLog');
     const div = document.createElement('div');
-    div.className = 'msg ' + cls;
+    div.className = 'msg ' + cls + (opts.pending ? ' pending' : '');
+    if (opts.id) div.dataset.msgId = opts.id;
     const body = document.createElement('div');
     body.textContent = text;
     div.appendChild(body);
+    if (opts.pending) {
+      const status = document.createElement('div');
+      status.className = 'msg-status';
+      status.textContent = 'sending…';
+      div.appendChild(status);
+    }
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
     if (opts.persist !== false) {
       const key = currentHistoryKey();
-      saveHistoryEntry(key, { text: text, cls: cls });
+      saveHistoryEntry(key, { id: opts.id, text: text, cls: cls, pending: !!opts.pending });
     }
+  }
+  function markMsgSentInUI(contactId, id) {
+    if (!id || !isViewingContact(contactId)) return;
+    const el = document.querySelector('.msg[data-msg-id="' + id.replace(/"/g, '') + '"]');
+    if (!el) return;
+    el.classList.remove('pending');
+    const status = el.querySelector('.msg-status');
+    if (status) status.remove();
   }
 
   function waitIceComplete(pc, timeoutMs) {
@@ -347,7 +384,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     await waitIceComplete(conn.pc);
 
     const pubJwk = await exportPub(conn.myKeyPair.publicKey);
-    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: pubJwk }));
+    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: pubJwk, name: getUsername() }));
   }
 
   async function acceptConnAnswerBundle(conn, raw) {
@@ -356,6 +393,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     const theirPub = await importPub(bundle.pub);
     conn.sharedAesKey = await deriveShared(conn.myKeyPair.privateKey, theirPub);
     conn.peerPubJwk = bundle.pub;
+    conn.peerName = bundle.name || conn.peerName;
     if (conn.showFingerprint) {
       const myPubJwk = await exportPub(conn.myKeyPair.publicKey);
       renderFingerprint(await combinedFingerprint(myPubJwk, bundle.pub));
@@ -380,13 +418,14 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     const theirPub = await importPub(bundle.pub);
     conn.sharedAesKey = await deriveShared(conn.myKeyPair.privateKey, theirPub);
     conn.peerPubJwk = bundle.pub;
+    conn.peerName = bundle.name || conn.peerName;
     if (conn.showFingerprint) {
       const myPubJwk = await exportPub(conn.myKeyPair.publicKey);
       renderFingerprint(await combinedFingerprint(myPubJwk, bundle.pub));
     }
 
     const myPubJwk2 = await exportPub(conn.myKeyPair.publicKey);
-    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: myPubJwk2 }));
+    return btoa(JSON.stringify({ sdp: conn.pc.localDescription, pub: myPubJwk2, name: getUsername() }));
   }
 
   // ---------- 1:1 data channel handlers (new line + reconnect) ----------
@@ -395,12 +434,17 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     if (currentView && currentView.type === 'contact' && conn.contact && conn.contact.id) {
       const c = contacts.find(x => x.id === conn.contact.id);
       if (c && conn.peerPubJwk) { c.peerPub = conn.peerPubJwk; saveContacts(contacts); }
+      if (c && conn.peerName && conn.peerName !== c.name) {
+        c.name = conn.peerName; saveContacts(contacts);
+        conn.contact.name = conn.peerName;
+        $('chatHeaderName').textContent = conn.peerName;
+      }
       connections[c ? c.id : conn.contact.id] = conn;
       renderConversationUI(c || conn.contact);
       return;
     }
     const id = 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const contact = { id: id, name: pendingLineName || 'Unnamed', isHost: conn.isHost, roomCode: conn.usingRelay ? conn.roomCode : null, peerPub: conn.peerPubJwk, myPub: null, myPriv: null };
+    const contact = { id: id, name: conn.peerName || 'Unnamed', isHost: conn.isHost, roomCode: conn.usingRelay ? conn.roomCode : null, peerPub: conn.peerPubJwk, myPub: null, myPriv: null };
     if (conn.myKeyPair) {
       try {
         contact.myPub = await exportPub(conn.myKeyPair.publicKey);
@@ -454,6 +498,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       $('chatHeader').style.display = 'flex';
 
       await finalizeContactOnConnect(conn);
+      await flushOutbox(conn);
 
       addMsg('Line connected. Messages below are end-to-end encrypted.', 'sys');
       if (conn.isHost) setStatus('connectStatusHost', 'connected', 'ok');
@@ -476,9 +521,29 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     };
   }
 
+  // Send any messages composed while offline (queued as pending) once the line reopens — this is
+  // how both sides' histories converge after a reconnect, since there's no server to hold messages.
+  async function flushOutbox(conn) {
+    if (!conn.contact || !conn.dc || conn.dc.readyState !== 'open') return;
+    const key = historyKey(conn.contact.id);
+    const hist = loadHistory(key);
+    let changed = false;
+    for (const entry of hist) {
+      if (entry.cls === 'me' && entry.pending && entry.id) {
+        try {
+          conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', id: entry.id, v: entry.text }));
+          entry.pending = false;
+          changed = true;
+          markMsgSentInUI(conn.contact.id, entry.id);
+        } catch (e) { break; }
+      }
+    }
+    if (changed) localStorage.setItem(key, JSON.stringify(hist));
+  }
+
   async function handleContactMessage(conn, obj) {
     if (obj.t === 'text') {
-      addMsg(obj.v, 'them');
+      if (!historyHasId(historyKey(conn.contact.id), obj.id)) addMsg(obj.v, 'them', { id: obj.id });
     } else if (obj.t === 'file-start') {
       incoming[obj.id] = { name: obj.name, size: obj.size, mime: obj.mime, chunks: new Array(obj.chunks), received: 0 };
       addMsg('Receiving file: ' + obj.name + ' (' + fmtSize(obj.size) + ')\u2026', 'sys');
@@ -739,13 +804,16 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   async function sendMessage() {
     const input = $('msgInput');
     const text = input.value.trim();
-    if (!text || !currentView) return;
+    if (!text || !currentView || currentView.type !== 'contact') return;
 
     const conn = connections[currentView.contactId];
-    if (!conn || !conn.dc || conn.dc.readyState !== 'open') return;
-    conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', v: text }));
+    const id = genMsgId();
+    const open = !!(conn && conn.dc && conn.dc.readyState === 'open');
+    // If the line isn't open yet (still reconnecting), queue the message as pending instead of
+    // dropping it — it gets sent automatically once the data channel opens (see flushOutbox).
+    if (open) conn.dc.send(await encryptObj(conn.sharedAesKey, { t: 'text', id: id, v: text }));
 
-    addMsg(text, 'me');
+    addMsg(text, 'me', { id: id, pending: !open });
     input.value = '';
     if (!firstMessageSent) {
       firstMessageSent = true;
@@ -775,7 +843,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
 
   function resetNewLineUI() {
-    $('lineName').value = '';
+    $('lineName').value = getUsername();
     $('useRelay').checked = false;
     $('btnHost').disabled = false;
     $('btnJoin').disabled = false;
@@ -787,6 +855,11 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     markActive($('step1'));
   });
   $('btnBackToContacts').addEventListener('click', () => location.reload());
+  $('btnEditYouName').addEventListener('click', () => {
+    const current = getUsername();
+    const name = (prompt('Your name (shown to people you connect with):', current) || '').trim();
+    if (name) setUsername(name);
+  });
 
   $('btnClearEverything').addEventListener('click', () => {
     if (!confirm('Erase everything? This deletes every saved line and message history from this device. This cannot be undone.')) return;
@@ -832,7 +905,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   $('btnHost').addEventListener('click', () => {
     const name = $('lineName').value.trim();
     if (!name) { $('lineName').focus(); return; }
-    pendingLineName = name;
+    setUsername(name);
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
     if ($('useRelay').checked) markActive($('step2hostRelay'));
@@ -841,7 +914,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   $('btnJoin').addEventListener('click', () => {
     const name = $('lineName').value.trim();
     if (!name) { $('lineName').focus(); return; }
-    pendingLineName = name;
+    setUsername(name);
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
     if ($('useRelay').checked) markActive($('step2joinRelay'));
@@ -1058,6 +1131,15 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     currentView = { type: 'contact', contactId: contact.id };
     pendingReconnectContactId = id;
     renderConversationUI(contact);
+    // Show the chat (and let them type) right away, even though the line isn't back up yet —
+    // anything sent now queues locally and goes out as soon as the reconnect finishes.
+    document.body.classList.add('connected');
+    $('chat').classList.add('active');
+    $('chatHeader').style.display = 'flex';
+    $('msgInput').disabled = false;
+    $('btnSend').disabled = false;
+    $('btnAttach').disabled = true;
+    $('btnCallAudio').disabled = true;
     attemptReconnectToContact(contact);
   }
 
@@ -1183,7 +1265,14 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     conn.dc.onopen = () => {
       console.log('[Aegis bg:' + conn.contact.name + ']', 'data channel OPEN');
       conn.status = 'open';
+      if (conn.peerName && conn.peerName !== conn.contact.name) {
+        const contacts = getContacts();
+        const c = contacts.find(x => x.id === conn.contact.id);
+        if (c) { c.name = conn.peerName; saveContacts(contacts); }
+        conn.contact.name = conn.peerName;
+      }
       requestWakeLock();
+      flushOutbox(conn);
       renderHomeLists();
     };
     conn.dc.onclose = () => dropBackgroundConn(conn, 'dc closed');
@@ -1191,8 +1280,11 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
       try {
         const obj = await decryptObj(conn.sharedAesKey, e.data);
         if (obj.t === 'text') {
-          saveHistoryEntry(historyKey(conn.contact.id), { text: obj.v, cls: 'them' });
-          bumpUnread(conn.contact.id);
+          const key = historyKey(conn.contact.id);
+          if (!historyHasId(key, obj.id)) {
+            saveHistoryEntry(key, { id: obj.id, text: obj.v, cls: 'them' });
+            bumpUnread(conn.contact.id);
+          }
         } else if (obj.t === 'call-offer') {
           handleIncomingCallOffer(conn, obj);
         } else if (obj.t === 'call-answer') {
@@ -1295,6 +1387,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     relayCapableContacts().forEach(contact => connectContactInBackground(contact));
   }
 
+  renderYouRow();
   renderHomeLists();
   connectAllHomeLines();
 })();
