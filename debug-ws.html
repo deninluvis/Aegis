@@ -8,15 +8,16 @@
   button{font-family:inherit;padding:10px 16px;margin:6px 6px 6px 0;border-radius:6px;border:1px solid #2B3140;background:#1F2430;color:#E9E4D8;}
 </style>
 <h1>Aegis WebSocket diagnostic</h1>
-<p>This page does nothing but try two WebSocket connections and report exactly what happens — no app logic involved.</p>
-<button id="run">Run both tests</button>
+<p>This page does nothing but try raw WebSocket connections and report exactly what happens — no app logic involved.</p>
+<button id="run">Run all tests</button>
 <pre id="log">(not run yet)</pre>
 <script>
 const logEl = document.getElementById('log');
 function log(s) {
-  logEl.textContent += (logEl.textContent === '(not run yet)' ? '' : '\n') + s;
-  logEl.textContent = logEl.textContent.replace('(not run yet)', '');
+  logEl.textContent = (logEl.textContent === '(not run yet)' ? '' : logEl.textContent + '\n') + s;
 }
+const SIGNAL = 'wss://aegis-signal.deninluvis.workers.dev';
+
 function testSocket(label, url) {
   return new Promise((resolve) => {
     const t0 = performance.now();
@@ -49,13 +50,57 @@ function testSocket(label, url) {
   });
 }
 
+// Simulates the actual app flow: two peers joining the same room, one
+// sending a message to the other, then one leaving — this is what real
+// usage looks like, unlike a single connection opening and immediately
+// closing itself (which the app never does, and which can look broken
+// even on healthy relay code).
+function testRoom() {
+  return new Promise((resolve) => {
+    const room = 'DBG' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const t0 = performance.now();
+    log('[room test] using room ' + room);
+    const evA = [], evB = [];
+    const mark = (arr, what) => arr.push(what + ' @' + Math.round(performance.now() - t0) + 'ms');
+
+    const wsA = new WebSocket(SIGNAL + '?room=' + room);
+    wsA.onopen = () => mark(evA, 'OPEN');
+    wsA.onmessage = (e) => mark(evA, 'MSG:' + e.data);
+    wsA.onerror = () => mark(evA, 'ERROR');
+    wsA.onclose = (e) => mark(evA, 'CLOSE code=' + e.code);
+
+    let wsB;
+    setTimeout(() => {
+      wsB = new WebSocket(SIGNAL + '?room=' + room);
+      wsB.onopen = () => mark(evB, 'OPEN');
+      wsB.onmessage = (e) => mark(evB, 'MSG:' + e.data);
+      wsB.onerror = () => mark(evB, 'ERROR');
+      wsB.onclose = (e) => mark(evB, 'CLOSE code=' + e.code);
+    }, 600);
+
+    setTimeout(() => {
+      if (wsA.readyState === WebSocket.OPEN) { try { wsA.send('hello-from-A'); } catch (e) {} }
+    }, 1400);
+
+    setTimeout(() => {
+      log('[room test] peer A: ' + (evA.join(', ') || '(nothing happened)'));
+      log('[room test] peer B: ' + (evB.join(', ') || '(nothing happened)'));
+      try { wsA.close(); } catch (e) {}
+      try { wsB.close(); } catch (e) {}
+      resolve();
+    }, 2400);
+  });
+}
+
 document.getElementById('run').addEventListener('click', async () => {
   logEl.textContent = '';
   const room = 'DBG' + Math.random().toString(36).slice(2, 8).toUpperCase();
-  await testSocket('aegis relay', 'wss://aegis-signal.deninluvis.workers.dev/?room=' + room);
+  await testSocket('aegis relay, single connection', SIGNAL + '?room=' + room);
   log('');
   await testSocket('public echo server (postman-echo.com)', 'wss://ws.postman-echo.com/raw');
   log('');
-  log('Done. Send a screenshot or copy of this log back.');
+  await testRoom();
+  log('');
+  log('Done. Send a screenshot or copy of this log back. Expect for the room test: peer A gets OPEN then MSG:{"t":"peer-joined"}, peer B gets OPEN then MSG:{"t":"peer-joined"} then MSG:hello-from-A, then both CLOSE code=1000.');
 });
 </script>
