@@ -1351,7 +1351,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
 
   // ---------- keep saved lines connected in the background (home screen presence + unread) ----------
-  const BACKGROUND_RETRY_MS = 20000;
+  const BACKGROUND_RETRY_MS = 1000;
   const NEGOTIATE_TIMEOUT_MS = 15000; // cap on the active WebRTC handshake, once both sides have shown up in the relay room
 
   function dropBackgroundConn(conn, reason) {
