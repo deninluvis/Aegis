@@ -49,7 +49,15 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   function updateLoginContinueState() {
     $('btnLoginContinue').disabled = !($('loginName').value.trim() && loginSelectedAvatar);
   }
-  function openLoginScreen(isEdit) {
+  function refreshStep1Identity() {
+    const nameEl = $('step1Name');
+    const avatarEl = $('step1Avatar');
+    if (nameEl) nameEl.textContent = getUsername() || '(not set)';
+    if (avatarEl) avatarEl.textContent = getAvatar() || '🙂';
+  }
+  let loginReturnTo = 'contacts';
+  function openLoginScreen(isEdit, returnTo) {
+    loginReturnTo = returnTo || 'contacts';
     loginSelectedAvatar = getAvatar() || null;
     $('loginName').value = getUsername();
     renderAvatarGrid();
@@ -65,7 +73,8 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
   function closeLoginScreen() {
     $('loginScreen').style.display = 'none';
-    $('contactsPanel').style.display = 'block';
+    if (loginReturnTo === 'step1') refreshStep1Identity();
+    else $('contactsPanel').style.display = 'block';
   }
   $('loginName').addEventListener('input', updateLoginContinueState);
   $('btnLoginCancel').addEventListener('click', closeLoginScreen);
@@ -79,7 +88,8 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
     renderHomeLists();
     connectAllHomeLines();
   });
-  $('btnEditYouName').addEventListener('click', () => openLoginScreen(true));
+  $('btnEditYouName').addEventListener('click', () => openLoginScreen(true, 'contacts'));
+  $('btnEditYouNameStep1').addEventListener('click', () => openLoginScreen(true, 'step1'));
 
   // ---------- notifications (local only — nothing here ever touches a server) ----------
   function renderNotifRow() {
@@ -972,7 +982,7 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
   }
 
   function resetNewLineUI() {
-    $('lineName').value = getUsername();
+    refreshStep1Identity();
     $('useRelay').checked = false;
     $('btnHost').disabled = false;
     $('btnJoin').disabled = false;
@@ -1027,18 +1037,12 @@ console.log('[Aegis] script.js executing at', new Date().toISOString(),
 
   // ---------- role selection (new 1:1 line) ----------
   $('btnHost').addEventListener('click', () => {
-    const name = $('lineName').value.trim();
-    if (!name) { $('lineName').focus(); return; }
-    setUsername(name);
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
     if ($('useRelay').checked) markActive($('step2hostRelay'));
     else markActive($('step2host'));
   });
   $('btnJoin').addEventListener('click', () => {
-    const name = $('lineName').value.trim();
-    if (!name) { $('lineName').focus(); return; }
-    setUsername(name);
     $('btnHost').disabled = true;
     $('btnJoin').disabled = true;
     if ($('useRelay').checked) markActive($('step2joinRelay'));

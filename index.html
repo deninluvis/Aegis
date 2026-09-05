@@ -82,12 +82,15 @@
       <div class="step-num">1</div>
       <div>
         <div class="step-title">Choose who starts</div>
-        <div class="step-sub">One of you opens the line, the other joins it. Doesn't matter who. Your name below is shared with them automatically when you connect — no need to type theirs.</div>
+        <div class="step-sub">One of you opens the line, the other joins it. Doesn't matter who. Your name and avatar are shared with them automatically when you connect — no need to type theirs.</div>
       </div>
     </div>
     <div class="step-body">
       <button id="btnBackToContacts" class="back-link">← Back to contacts</button>
-      <input type="text" id="lineName" class="name-input" placeholder="Your name (e.g. Alex)" maxlength="40">
+      <div class="you-row">
+        <span class="you-id"><span class="you-avatar" id="step1Avatar">🙂</span>Starting as <strong id="step1Name">—</strong></span>
+        <button id="btnEditYouNameStep1">Edit</button>
+      </div>
       <div class="role-pick">
         <button class="primary" id="btnHost">I'll start the line</button>
         <button id="btnJoin">I'm joining a line</button>
